@@ -1,5 +1,6 @@
 
 import itertools
+import networkx
 
 def some_name(obj, length=5):
     h = hash(obj)
@@ -16,6 +17,7 @@ def some_name(obj, length=5):
             h //= len(vowels)
         consonant = not consonant
     return res
+
 
 class Node:
     global_index = 0
@@ -62,14 +64,41 @@ class Hyperedge:
             return self.merged.follow()
 
 
+class Recursively:
+    def __init__(self, node):
+        self.node = node
+
+    def follow(self):
+        return Recursively(self.node.follow())
+
 class Term:
     def __init__(self, label, dst=None):
+        if dst is None and isinstance(label, tuple):
+            dst = [s if isinstance(s, (Node, Term)) else Term(s) for s in label[1:]]
+            label = label[0]
+
         if dst is None:
             dst = []
 
-        self.dst = dst
-        self.label = label
-        self.hyperedge = None
+        self.hyperedge = Hyperedge(label, None, dst)
+
+    @property
+    def outgoing(self):
+        return [self.hyperedge]
+
+    @property
+    def label(self):
+        return self.hyperedge.label
+
+    @property
+    def dst(self):
+        return self.hyperedge.dst
+
+    def follow(self):
+        return self
+
+    def __repr__(self):
+        return repr(self.hyperedge.label) + repr(self.hyperedge.dst)
 
 
 class Hypergraph:
@@ -106,7 +135,7 @@ class Hypergraph:
         if isinstance(remove, (Hyperedge, Node)):
             remove = [remove]
 
-        if isinstance(add, (Node, Hyperedge)):
+        if isinstance(add, (Node, Hyperedge, Term)):
             add = [add]
 
         remove = [e.follow() for e in remove]
@@ -171,7 +200,8 @@ class Hypergraph:
                 hyperedge.src.outgoing.remove(hyperedge)
                 for dnode in hyperedge.dst:
                     dnode.incoming.remove(hyperedge)
-                del self._hyperedges[(hyperedge.label, tuple(hyperedge.dst))]
+                if self._hyperedges.get((hyperedge.label, tuple(hyperedge.dst))) is hyperedge:
+                    del self._hyperedges[(hyperedge.label, tuple(hyperedge.dst))]
 
     def _merge(self, merge):
         if not merge:
@@ -184,13 +214,16 @@ class Hypergraph:
                     (n1, n2) = (n2, n1)
                 n1.merged = n2
                 added = []
-                for h in itertools.chain(n1.incoming, n1.outgoing):
-                    if self._hyperedges.get((h.label, tuple(h.dst))) is h:
-                        del self._hyperedges[(h.label, tuple(h.dst))]
-                    new_src = n2 if h.src is n1 else h.src
-                    new_dst = [n2 if n is n1 else n for n in h.dst]
-                    h.merged = self._add_hyperedge(Hyperedge(h.label, new_src, new_dst),
-                                                   added, to_merge)
+                for h in list(itertools.chain(n1.incoming, n1.outgoing)):
+                    if h.merged is None:
+                        if self._hyperedges.get((h.label, tuple(h.dst))) is h:
+                            del self._hyperedges[(h.label, tuple(h.dst))]
+                        new_src = n2 if h.src is n1 else h.src
+                        new_dst = [n2 if n is n1 else n for n in h.dst]
+                        h.merged = self._add_hyperedge(Hyperedge(h.label, new_src, new_dst),
+                                                       added, to_merge)
+                        h.to_be_removed = True
+                        self._remove_hyperedge(h, 1, [])
                 self._nodes.remove(n1)
                 self.on_merge(n1, added)
         self._merge(to_merge)
@@ -198,6 +231,11 @@ class Hypergraph:
     def _add(self, elements, added, to_merge, resmap):
         res = []
         for e in elements:
+            recursively = False
+            if isinstance(e, Recursively):
+                recursively = True
+                e = e.node
+
             if isinstance(e, Node):
                 if e in self._nodes:
                     res.append(e)
@@ -209,23 +247,36 @@ class Hypergraph:
                         added.append(n)
                         resmap[e] = n
                     res.append(resmap[e])
-                else:
+                elif recursively:
                     resmap[e] = None
                     for h in e.outgoing:
                         if h.src is not None and h.src is not e:
                             raise ValueError("The source of a hyperedge being added is not the same"
                                              "as its parent node")
-                        new_dst = self._add(h.dst, added, to_merge, resmap)
+                        new_dst = self._add([Recursively(d) for d in h.dst],
+                                            added, to_merge, resmap)
                         h_res = self._add_hyperedge(Hyperedge(h.label, resmap[e], new_dst),
                                                     added, to_merge)
                         resmap[e] = h_res.src
                         resmap[h] = h_res
                     res.append(resmap[e])
-            elif isinstance(e, Hyperedge):
+                else:
+                    n = Node()
+                    self._nodes.add(n)
+                    resmap[e] = n
+                    res.append(n)
+            elif isinstance(e, (Hyperedge, Term)):
+                if isinstance(e, Term):
+                    e = e.hyperedge
                 if e in resmap:
                     res.append(resmap[e])
                 else:
-                    new_dst = self._add(e.dst, added, to_merge, resmap)
+                    if recursively:
+                        new_dst = self._add([Recursively(d) for d in e.dst],
+                                            added, to_merge, resmap)
+                    else:
+                        new_dst = self._add(e.dst, added, to_merge, resmap)
+
                     if e.src is None or e.src in self._nodes:
                         h = self._add_hyperedge(Hyperedge(e.label, e.src, new_dst),
                                                 added, to_merge)
@@ -236,6 +287,7 @@ class Hypergraph:
                         h = self._add_hyperedge(Hyperedge(e.label, None, new_dst),
                                                 added, to_merge)
                         resmap[e.src] = h.src
+
                     resmap[e] = h
                     res.append(h)
             else:
@@ -267,3 +319,19 @@ class Hypergraph:
         return hyperedge
 
 
+    def as_networkx(self):
+        graph = networkx.MultiDiGraph()
+        graph.add_nodes_from(id(n) for n in self._nodes)
+        graph.add_nodes_from(id(h) for h in self._hyperedges.values())
+        for h in self._hyperedges.values():
+            graph.add_edge(id(h.src), id(h))
+            graph.add_edges_from((id(h), id(d), i) for i, d in enumerate(h.dst))
+        return graph
+
+    def isomorphic(self, other):
+        return networkx.algorithms.isomorphism.is_isomorphic(self.as_networkx(),
+                                                             other.as_networkx())
+
+
+def hypergraph_strategy():
+    pass
