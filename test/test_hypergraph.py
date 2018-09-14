@@ -1,5 +1,6 @@
 from peqsen.hypergraph import Hypergraph, Node, Hyperedge, Term, Recursively
-from hypothesis import given
+import peqsen.hypergraph as H
+from hypothesis import given, strategies, reproduce_failure
 
 def test_basic_operations():
     hg = Hypergraph()
@@ -29,7 +30,53 @@ def test_basic_operations():
 
     assert hg_first.isomorphic(hg3)
 
+@given(strategies.data())
+def test_simple_addition(data):
+    h1 = Hypergraph()
+    h2 = Hypergraph()
+
+    to_add1 = data.draw(H.simple_addition_strategy())
+    to_add2 = data.draw(strategies.permutations(to_add1))
+
+    h1.rewrite(add=to_add1)
+    h2.rewrite(add=to_add2)
+
+    iso = h1.isomorphic(h2)
+
+    if not iso:
+        print(h1)
+        print(h2)
+
+    assert iso
+
+@given(strategies.data())
+def test_simple_addition_twice(data):
+    h1 = Hypergraph()
+    h2 = Hypergraph()
+
+    to_add1 = data.draw(H.simple_addition_strategy())
+    to_add2 = data.draw(H.simple_addition_strategy())
+
+    h1.rewrite(add=to_add1)
+    h2.rewrite(add=data.draw(strategies.permutations(to_add1)))
+
+    h1.check_integrity()
+
+    h1.rewrite(add=to_add2)
+    h2.rewrite(add=data.draw(strategies.permutations(to_add2)))
+
+    h1.check_integrity()
+
+    iso = h1.isomorphic(h2)
+
+    if not iso:
+        print(h1)
+        print(h2)
+
+    assert iso
 
 
 if __name__ == "__main__":
     test_basic_operations()
+    test_simple_addition()
+    test_simple_addition_twice()

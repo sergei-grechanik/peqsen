@@ -1,6 +1,8 @@
 
 import itertools
 import networkx
+import hypothesis
+from hypothesis import strategies
 
 def some_name(obj, length=5):
     h = hash(obj)
@@ -107,17 +109,21 @@ class Hypergraph:
         self._nodes = set()
         self._hyperedges = {}
 
-    def as_text(self):
-        res = ""
+    def __repr__(self):
+        res = object.__repr__(self) + " {\n"
         for n in self._nodes:
-            res += str(n) + " {\n"
+            res += "    " + str(n) + " {\n"
             for h in n.outgoing:
-                res += "    " + str(h) + "\n"
-            res += "}\n"
+                res += "        " + str(h) + "\n"
+            res += "    }\n"
+        res += "}\n"
         return res
 
     def nodes(self):
         return self._nodes
+
+    def hyperedges(self):
+        return self._hyperedges.values()
 
     def on_add(self, elements):
         pass
@@ -199,7 +205,7 @@ class Hypergraph:
                 hyperedge.to_be_removed = False
                 hyperedge.src.outgoing.remove(hyperedge)
                 for dnode in hyperedge.dst:
-                    dnode.incoming.remove(hyperedge)
+                    dnode.incoming.discard(hyperedge)
                 if self._hyperedges.get((hyperedge.label, tuple(hyperedge.dst))) is hyperedge:
                     del self._hyperedges[(hyperedge.label, tuple(hyperedge.dst))]
 
@@ -208,10 +214,12 @@ class Hypergraph:
             return
         to_merge = []
         for n1, n2 in merge:
-            if n1 is not n2 and (n1.merged is None or n2.merged is None or
-                                 n1.merged is not n2.merged):
-                if len(n1.incoming) + len(n1.outgoing) > len(n2.incoming) + len(n2.outgoing):
-                    (n1, n2) = (n2, n1)
+            n1 = n1.follow()
+            n2 = n2.follow()
+            if n1 is not n2:
+                # We cannot sort them like this, it breaks our implementation of cong closure
+                # if len(n1.incoming) + len(n1.outgoing) > len(n2.incoming) + len(n2.outgoing):
+                #     (n1, n2) = (n2, n1)
                 n1.merged = n2
                 added = []
                 for h in list(itertools.chain(n1.incoming, n1.outgoing)):
@@ -318,6 +326,28 @@ class Hypergraph:
 
         return hyperedge
 
+    def check_integrity(self, strict=True):
+        """Sometimes hypergrah may be in a non-congruent-closed state. It may happen between
+        on_add and on_merge when a node gets an outgoing hyperedge which leads to its merging, but
+        it cannot be merged yet."""
+        for n in self._nodes:
+            assert n.merged is None
+            for h in n.outgoing:
+                assert h.merged is None
+                assert h.src is n
+                assert all(d in self._nodes for d in h.dst)
+                assert all(h in d.incoming for d in h.dst)
+                if strict:
+                    assert self._hyperedges[(h.label, tuple(h.dst))] is h
+            for h in n.incoming:
+                assert h.merged is None
+                assert h.src in self._nodes
+                assert all(d in self._nodes for d in h.dst)
+                assert all(h in d.incoming for d in h.dst)
+                if strict:
+                    assert self._hyperedges[(h.label, tuple(h.dst))] is h
+        for h in self.hyperedges():
+            assert h.src in self._nodes
 
     def as_networkx(self):
         graph = networkx.MultiDiGraph()
@@ -332,6 +362,33 @@ class Hypergraph:
         return networkx.algorithms.isomorphism.is_isomorphic(self.as_networkx(),
                                                              other.as_networkx())
 
+@strategies.composite
+def hyperedge_strategy(draw, nodes, labels=['a', 'b'], max_children=10):
+    if isinstance(labels, (list, tuple)):
+        labels = strategies.sampled_from(labels)
+    if isinstance(nodes, (list, tuple)):
+        nodes = strategies.sampled_from(nodes)
+    src = draw(nodes)
+    dst = draw(strategies.lists(nodes, max_size=max_children))
+    label = draw(labels)
+    return Hyperedge(label, src, dst)
 
-def hypergraph_strategy():
-    pass
+@strategies.composite
+def simple_addition_strategy(draw, labels=['a', 'b'],
+                             max_nodes=20, max_hyperedges=100, max_children=10):
+    nodes = [Node() for i in range(draw(strategies.integers(0, max_nodes)))]
+    hyperedges = draw(strategies.lists(hyperedge_strategy(nodes, labels, max_children),
+                                       max_size=max_hyperedges))
+    return draw(strategies.permutations(nodes + hyperedges))
+
+@strategies.composite
+def hypergraph_strategy(draw, labels=strategies.sampled_from(['a', 'b']),
+                        max_nodes=20, max_hyperedges=100, max_children=10):
+    to_add = draw(simple_addition_strategy(labels=labels,
+                                           max_nodes=max_nodes,
+                                           max_hyperedges=max_hyperedges,
+                                           max_children=max_children))
+    h = Hypergraph()
+    h.rewrite(add=to_add)
+    return h
+
