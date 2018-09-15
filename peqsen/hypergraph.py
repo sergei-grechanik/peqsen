@@ -51,7 +51,8 @@ class Hyperedge:
         self.merged = None
 
     def __repr__(self):
-        return repr(self.src) + " -> " + repr(self.label) + " -> " + repr(self.dst) + \
+        return repr(self.src) + "->" + repr(self.label) + "{" + some_name(hash(self), 3) + "}" + \
+            "->" + repr(self.dst) + \
             ("(=" + repr(self.merged) + ")" if self.merged else "")
 
     def follow(self):
@@ -114,9 +115,10 @@ class Hypergraph:
         for n in self._nodes:
             res += "    " + str(n) + " {\n"
             for h in n.outgoing:
-                res += "        " + str(h) + "\n"
+                mark = '' if self._hyperedges[(h.label, tuple(h.dst))] is h else '! '
+                res += "        " + mark + str(h) + "\n"
             res += "    }\n"
-        res += "}\n"
+        res += "}"
         return res
 
     def nodes(self):
@@ -166,7 +168,7 @@ class Hypergraph:
 
         self._being_modified = False
 
-        return add_res
+        return [e.follow() for e in add_res]
 
     def _remove(self, elements, phase, removed=None):
         for e in elements:
@@ -216,20 +218,26 @@ class Hypergraph:
         for n1, n2 in merge:
             n1 = n1.follow()
             n2 = n2.follow()
-            if n1 is not n2:
-                # We cannot sort them like this, it breaks our implementation of cong closure
+            if n1 != n2:
+                # Sorting may break our implementation of cong closure, not sure
                 # if len(n1.incoming) + len(n1.outgoing) > len(n2.incoming) + len(n2.outgoing):
                 #     (n1, n2) = (n2, n1)
                 n1.merged = n2
                 added = []
-                for h in list(itertools.chain(n1.incoming, n1.outgoing)):
+                # This order: out then in is important
+                for h in list(itertools.chain(n1.outgoing, n1.incoming)):
                     if h.merged is None:
+                        new_src = n2 if h.src == n1 else h.src
+                        new_dst = [n2 if n == n1 else n for n in h.dst]
+
                         if self._hyperedges.get((h.label, tuple(h.dst))) is h:
+                            # bad case: merging of a hyperedge which is the main one
                             del self._hyperedges[(h.label, tuple(h.dst))]
-                        new_src = n2 if h.src is n1 else h.src
-                        new_dst = [n2 if n is n1 else n for n in h.dst]
-                        h.merged = self._add_hyperedge(Hyperedge(h.label, new_src, new_dst),
-                                                       added, to_merge)
+
+                        if h.merged is None:
+                            new_h = Hyperedge(h.label, new_src, new_dst)
+                            new_h.to_be_removed = h.to_be_removed
+                            h.merged = self._add_hyperedge(new_h, added, to_merge)
                         h.to_be_removed = True
                         self._remove_hyperedge(h, 1, [])
                 self._nodes.remove(n1)
@@ -258,7 +266,7 @@ class Hypergraph:
                 elif recursively:
                     resmap[e] = None
                     for h in e.outgoing:
-                        if h.src is not None and h.src is not e:
+                        if h.src is not None and h.src != e:
                             raise ValueError("The source of a hyperedge being added is not the same"
                                              "as its parent node")
                         new_dst = self._add([Recursively(d) for d in h.dst],
@@ -303,43 +311,62 @@ class Hypergraph:
         return res
 
     def _add_hyperedge(self, hyperedge, added, to_merge):
+        # First, check if an equivalent hyperedge exists
         existing = self._hyperedges.get((hyperedge.label, tuple(hyperedge.dst)))
         if existing is not None:
             if hyperedge.src == existing.src or hyperedge.src is None:
-                existing.to_be_removed = False
+                # Good, nothing to do, just mark that we don't want to remove it
+                existing.to_be_removed = existing.to_be_removed and hyperedge.to_be_removed
                 return existing
             else:
+                # in this case we have to merge the sources, and continue adding the hyperedge
                 to_merge.append((hyperedge.src, existing.src))
-        else:
-            self._hyperedges[(hyperedge.label, tuple(hyperedge.dst))] = hyperedge
 
+        # In some cases there may be an existing hyperedge which wasn't registered in _hyperedges
+        if hyperedge.src is not None:
+            for h in hyperedge.src.outgoing:
+                if h.label == hyperedge.label and h.dst == hyperedge.dst:
+                    h.to_be_removed = h.to_be_removed and hyperedge.to_be_removed
+                    if existing is None:
+                        self._hyperedges[(hyperedge.label, tuple(hyperedge.dst))] = h
+                    return h
+
+        # Now this hyperedge should be added as a new hyperedge
+
+        # Crete the source
         if hyperedge.src is None:
             hyperedge.src = Node()
             self._nodes.add(hyperedge.src)
             added.append(hyperedge.src)
 
-        hyperedge.to_be_removed = False
-        added.append(hyperedge)
         hyperedge.src.outgoing.add(hyperedge)
         for d in hyperedge.dst:
             d.incoming.add(hyperedge)
 
+        added.append(hyperedge)
+
+        # Register the hyperedge if it wasn't registered before
+        if existing is None:
+            self._hyperedges[(hyperedge.label, tuple(hyperedge.dst))] = hyperedge
+
         return hyperedge
 
     def check_integrity(self, strict=True):
-        """Sometimes hypergrah may be in a non-congruent-closed state. It may happen between
+        """Sometimes hypergraph may be in a non-congruent-closed state. It may happen between
         on_add and on_merge when a node gets an outgoing hyperedge which leads to its merging, but
-        it cannot be merged yet."""
+        it cannot be merged yet. In this case use `strict=False`."""
         for n in self._nodes:
             assert n.merged is None
             for h in n.outgoing:
+                assert not h.to_be_removed
                 assert h.merged is None
-                assert h.src is n
+                assert h.src == n
                 assert all(d in self._nodes for d in h.dst)
                 assert all(h in d.incoming for d in h.dst)
                 if strict:
                     assert self._hyperedges[(h.label, tuple(h.dst))] is h
             for h in n.incoming:
+                assert not h.to_be_removed
                 assert h.merged is None
                 assert h.src in self._nodes
                 assert all(d in self._nodes for d in h.dst)
@@ -363,7 +390,7 @@ class Hypergraph:
                                                              other.as_networkx())
 
 @strategies.composite
-def hyperedge_strategy(draw, nodes, labels=['a', 'b'], max_children=10):
+def gen_hyperedge(draw, nodes, labels=['a', 'b'], max_children=10):
     if isinstance(labels, (list, tuple)):
         labels = strategies.sampled_from(labels)
     if isinstance(nodes, (list, tuple)):
@@ -374,20 +401,37 @@ def hyperedge_strategy(draw, nodes, labels=['a', 'b'], max_children=10):
     return Hyperedge(label, src, dst)
 
 @strategies.composite
-def simple_addition_strategy(draw, labels=['a', 'b'],
-                             max_nodes=20, max_hyperedges=100, max_children=10):
+def gen_simple_addition(draw, labels=['a', 'b'],
+                        max_nodes=10, max_hyperedges=100, max_children=5):
     nodes = [Node() for i in range(draw(strategies.integers(0, max_nodes)))]
-    hyperedges = draw(strategies.lists(hyperedge_strategy(nodes, labels, max_children),
+    hyperedges = draw(strategies.lists(gen_hyperedge(nodes, labels, max_children),
                                        max_size=max_hyperedges))
     return draw(strategies.permutations(nodes + hyperedges))
 
 @strategies.composite
-def hypergraph_strategy(draw, labels=strategies.sampled_from(['a', 'b']),
-                        max_nodes=20, max_hyperedges=100, max_children=10):
-    to_add = draw(simple_addition_strategy(labels=labels,
-                                           max_nodes=max_nodes,
-                                           max_hyperedges=max_hyperedges,
-                                           max_children=max_children))
+def gen_rewrite(draw, hypergraph, labels=['a', 'b'],
+                max_add_nodes=10, max_add_hyperedges=20, max_children=5,
+                max_remove=20, max_merge=20):
+    add_nodes = [Node() for i in range(draw(strategies.integers(0, max_add_nodes)))]
+    nodes = list(hypergraph.nodes())
+    add_hyperedges = draw(strategies.lists(gen_hyperedge(add_nodes + nodes,
+                                                         labels=labels, max_children=max_children),
+                                           max_size=max_add_hyperedges))
+    hyperedges = list(hypergraph.hyperedges())
+    remove = draw(strategies.lists(strategies.sampled_from(hyperedges), max_size=max_remove))
+    merge = draw(strategies.lists(strategies.tuples(strategies.sampled_from(nodes),
+                                                    strategies.sampled_from(nodes)),
+                                  max_size=max_merge))
+    add = draw(strategies.permutations(add_nodes + add_hyperedges))
+    return {'remove': remove, 'add': add, 'merge': merge}
+
+@strategies.composite
+def gen_hypergraph(draw, labels=strategies.sampled_from(['a', 'b']),
+                   max_nodes=10, max_hyperedges=100, max_children=5):
+    to_add = draw(gen_simple_addition(labels=labels,
+                                      max_nodes=max_nodes,
+                                      max_hyperedges=max_hyperedges,
+                                      max_children=max_children))
     h = Hypergraph()
     h.rewrite(add=to_add)
     return h

@@ -35,27 +35,29 @@ def test_simple_addition(data):
     h1 = Hypergraph()
     h2 = Hypergraph()
 
-    to_add1 = data.draw(H.simple_addition_strategy())
+    to_add1 = data.draw(H.gen_simple_addition())
     to_add2 = data.draw(strategies.permutations(to_add1))
 
-    h1.rewrite(add=to_add1)
+    added1 = h1.rewrite(add=to_add1)
     h2.rewrite(add=to_add2)
 
-    iso = h1.isomorphic(h2)
+    assert len(added1) == len(to_add1)
 
-    if not iso:
-        print(h1)
-        print(h2)
+    for e in added1:
+        if isinstance(e, Node):
+            assert e in h1.nodes()
+        else:
+            assert e in h1.hyperedges()
 
-    assert iso
+    assert h1.isomorphic(h2)
 
 @given(strategies.data())
 def test_simple_addition_twice(data):
     h1 = Hypergraph()
     h2 = Hypergraph()
 
-    to_add1 = data.draw(H.simple_addition_strategy())
-    to_add2 = data.draw(H.simple_addition_strategy())
+    to_add1 = data.draw(H.gen_simple_addition())
+    to_add2 = data.draw(H.gen_simple_addition())
 
     h1.rewrite(add=to_add1)
     h2.rewrite(add=data.draw(strategies.permutations(to_add1)))
@@ -67,16 +69,74 @@ def test_simple_addition_twice(data):
 
     h1.check_integrity()
 
-    iso = h1.isomorphic(h2)
+    assert h1.isomorphic(h2)
 
-    if not iso:
-        print(h1)
-        print(h2)
+@given(strategies.data())
+def test_add_ones_own(data):
+    """Adding its own edges and nodes to hypergraph will not change it"""
+    h1 = Hypergraph()
+    h2 = Hypergraph()
+    to_add = data.draw(H.gen_simple_addition())
+    h1.rewrite(add=to_add)
+    h2.rewrite(add=to_add)
+    assert h1.isomorphic(h2)
 
-    assert iso
+    nodes = list(h1.nodes())
+    add_nodes = data.draw(strategies.lists(strategies.sampled_from(nodes),
+                                           max_size=len(nodes)))
+    recursive = data.draw(strategies.lists(strategies.booleans(),
+                                           min_size=len(add_nodes), max_size=len(add_nodes)))
+    add_nodes = [Recursively(n) if r else n for n, r in zip(add_nodes, recursive)]
 
+    hyperedges = list(h1.hyperedges())
+    add_hyperedges = data.draw(strategies.lists(strategies.sampled_from(hyperedges),
+                                                max_size=len(hyperedges)))
+
+    h1.rewrite(add=add_nodes + add_hyperedges)
+    h1.check_integrity()
+    assert h1.isomorphic(h2)
+
+    # This won't work for non-terms
+    #h2.rewrite(add=add_nodes + add_hyperedges)
+    #h2.check_integrity()
+    #assert h1.isomorphic(h2)
+
+@given(strategies.data())
+def test_rewriting(data):
+    h = data.draw(H.gen_hypergraph())
+    for i in range(2):
+        rw = data.draw(H.gen_rewrite(h))
+        added = h.rewrite(**rw)
+        h.check_integrity()
+
+        nodes = h.nodes()
+        hyperedges = h.hyperedges()
+
+        for n1, n2 in rw['merge']:
+            n1 = n1.follow()
+            n2 = n2.follow()
+            assert n1 == n2
+            assert n1 in nodes
+
+        for e in added:
+            if isinstance(e, Node):
+                assert e in nodes
+            else:
+                assert e in hyperedges
+
+@given(strategies.data())
+def test_remove(data):
+    h = data.draw(H.gen_hypergraph())
+    rw = data.draw(H.gen_rewrite(h, max_add_hyperedges=0, max_merge=0))
+    h.rewrite(**rw)
+    hyperedges = h.hyperedges()
+    for h in rw['remove']:
+        assert not h in hyperedges
 
 if __name__ == "__main__":
     test_basic_operations()
     test_simple_addition()
     test_simple_addition_twice()
+    test_add_ones_own()
+    test_rewriting()
+    test_remove()
