@@ -38,6 +38,10 @@ class Node:
     def follow(self):
         return self if self.merged is None else self.merged.follow()
 
+    def apply_map(self, mapping):
+        res = mapping.get(self)
+        return self if res is None else res
+
 
 class Hyperedge:
     def __init__(self, label, src=None, dst=None):
@@ -65,6 +69,14 @@ class Hyperedge:
                                  [d.follow() for d in self.dst])
         else:
             return self.merged.follow()
+
+    def apply_map(self, mapping):
+        res = mapping.get(self)
+        if res is None:
+            return Hyperedge(self.label, None if self.src is None else self.src.apply_map(mapping),
+                             [d.apply_map(mapping) for d in self.dst])
+        else:
+            return res
 
 
 class Recursively:
@@ -136,7 +148,13 @@ class Hypergraph:
     def on_remove(self, elements):
         pass
 
-    def rewrite(self, remove=(), add=(), merge=()):
+    def add_from(self, hypergraph):
+        to_add = \
+            sorted(hypergraph.hyperedges(), key=lambda h: len(h.dst)) + list(hypergraph.nodes())
+        added = self.rewrite(add=to_add)
+        return dict(zip(to_add, added))
+
+    def rewrite(self, remove=(), add=(), merge=(), ignore_already_removed=False):
         if self._being_modified:
             raise RuntimeError("Trying to modify a hypergraph during another modification")
 
@@ -152,7 +170,7 @@ class Hypergraph:
 
         self._being_modified = True
 
-        self._remove(remove, 0)
+        self._remove(remove, 0, ignore_already_removed=ignore_already_removed)
 
         added = []
         to_merge = list(merge)
@@ -161,7 +179,7 @@ class Hypergraph:
         self.on_add(added)
 
         removed = []
-        self._remove(remove, 1, removed)
+        self._remove(remove, 1, removed, ignore_already_removed=ignore_already_removed)
         self.on_remove(removed)
 
         self._merge(to_merge)
@@ -170,11 +188,18 @@ class Hypergraph:
 
         return [e.follow() for e in add_res]
 
-    def _remove(self, elements, phase, removed=None):
+    def _remove(self, elements, phase, removed=None, ignore_already_removed=False):
         for e in elements:
             if isinstance(e, Node):
                 raise ValueError("Manual removal of nodes is forbidden")
             elif isinstance(e, Hyperedge):
+                # Check if hyperedge exists only on 0th phase
+                if phase == 0:
+                    if e.src is None or e.src not in self._nodes or e not in e.src.outgoing:
+                        if ignore_already_removed:
+                            continue
+                        else:
+                            raise ValueError("Hyperedge cannot be removed: {}", e)
                 self._remove_hyperedge(e, phase, removed)
             else:
                 raise ValueError("Cannot remove a thing of unknown type: {}".format(e))
@@ -197,9 +222,6 @@ class Hypergraph:
 
     def _remove_hyperedge(self, hyperedge, phase, removed):
         if phase == 0:
-            if hyperedge.src is None or hyperedge.src not in self._nodes or \
-               hyperedge not in hyperedge.src.outgoing or hyperedge.merged:
-                raise ValueError("Hyperedge cannot be removed: {}", hyperedge)
             hyperedge.to_be_removed = True
         elif phase == 1:
             if hyperedge.to_be_removed:
@@ -388,6 +410,11 @@ class Hypergraph:
     def isomorphic(self, other):
         return networkx.algorithms.isomorphism.is_isomorphic(self.as_networkx(),
                                                              other.as_networkx())
+
+def map_rewrite(rewrite, mapping):
+    return {'remove': [mapping[h] for h in rewrite['remove']],
+            'add': [x.apply_map(mapping) for x in rewrite['add']],
+            'merge': [tuple(mapping[x] for x in p) for p in rewrite['merge']]}
 
 @strategies.composite
 def gen_hyperedge(draw, nodes, labels=['a', 'b'], max_children=10):

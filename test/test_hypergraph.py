@@ -1,5 +1,6 @@
 from peqsen.hypergraph import Hypergraph, Node, Hyperedge, Term, Recursively
 import peqsen.hypergraph as H
+import hypothesis
 from hypothesis import given, strategies, reproduce_failure
 
 def test_basic_operations():
@@ -103,6 +104,8 @@ def test_add_ones_own(data):
 
 @given(strategies.data())
 def test_rewriting(data):
+    """Rewriting leaves graph in a consistent state. Also adding really adds and merging
+    really merges, removing is tested separately (because addition has higher priority)."""
     h = data.draw(H.gen_hypergraph())
     for i in range(2):
         rw = data.draw(H.gen_rewrite(h))
@@ -126,12 +129,107 @@ def test_rewriting(data):
 
 @given(strategies.data())
 def test_remove(data):
+    """Removing indeed removes"""
     h = data.draw(H.gen_hypergraph())
     rw = data.draw(H.gen_rewrite(h, max_add_hyperedges=0, max_merge=0))
     h.rewrite(**rw)
     hyperedges = h.hyperedges()
     for h in rw['remove']:
         assert not h in hyperedges
+
+@given(strategies.data())
+def test_add_from(data):
+    """add_from results in isomorphic graph, and its mapping can be used to apply the
+    same transformations to each copy."""
+    h1 = data.draw(H.gen_hypergraph())
+    h2 = Hypergraph()
+    mapping = h2.add_from(h1)
+    assert h1.isomorphic(h2)
+
+    rw1 = data.draw(H.gen_rewrite(h1))
+    rw2 = H.map_rewrite(rw1, mapping)
+
+    h1.rewrite(**rw1)
+    h2.rewrite(**rw2)
+
+    assert h1.isomorphic(h2)
+
+@given(strategies.data())
+def test_add_removed(data):
+    """Removing hyperedges and then adding the same hyperedges is noop."""
+    h1 = data.draw(H.gen_hypergraph())
+    h2 = Hypergraph()
+    mapping = h2.add_from(h1)
+
+    rw1 = data.draw(H.gen_rewrite(h1))
+    rw2 = H.map_rewrite(rw1, mapping)
+    rw2['remove'] = []
+
+    h1.rewrite(**rw1)
+    h1.rewrite(add=rw1['remove'])
+
+    h2.rewrite(**rw2)
+
+    assert h1.isomorphic(h2)
+
+@given(strategies.data())
+def test_rewrite_noremove_order(data):
+    """Rewritings that don't remove may be applied in any order"""
+    h1 = data.draw(H.gen_hypergraph())
+    h2 = Hypergraph()
+    h3 = Hypergraph()
+    mapping12 = h2.add_from(h1)
+    mapping23 = h3.add_from(h2)
+
+    rwa = data.draw(H.gen_rewrite(h1, max_remove=0))
+    rwb = data.draw(H.gen_rewrite(h1, max_remove=0))
+
+    h1.rewrite(**rwa)
+    h1.rewrite(**rwb)
+
+    rwa2 = H.map_rewrite(rwa, mapping12)
+    rwb2 = H.map_rewrite(rwb, mapping12)
+
+    h2.rewrite(**rwb2)
+    h2.rewrite(**rwa2)
+
+    rwa3 = H.map_rewrite(rwa2, mapping23)
+    rwb3 = H.map_rewrite(rwb2, mapping23)
+
+    h3.rewrite(add=(rwa3['add'] + rwb3['add']), merge=(rwa3['merge'] + rwb3['merge']))
+
+    assert h1.isomorphic(h2)
+    assert h1.isomorphic(h3)
+
+@given(strategies.data())
+def test_rewrite_remove_order(data):
+    """Rewritings that only remove hyperedges and add nodes may be applied in any order if
+    we ignore already removed."""
+    h1 = data.draw(H.gen_hypergraph())
+    h2 = Hypergraph()
+    h3 = Hypergraph()
+    mapping12 = h2.add_from(h1)
+    mapping23 = h3.add_from(h2)
+
+    rwa = data.draw(H.gen_rewrite(h1, max_add_hyperedges=0, max_merge=0))
+    rwb = data.draw(H.gen_rewrite(h1, max_add_hyperedges=0, max_merge=0))
+
+    h1.rewrite(**rwa)
+    h1.rewrite(**rwb, ignore_already_removed=True)
+
+    rwa2 = H.map_rewrite(rwa, mapping12)
+    rwb2 = H.map_rewrite(rwb, mapping12)
+
+    h2.rewrite(**rwb2)
+    h2.rewrite(**rwa2, ignore_already_removed=True)
+
+    rwa3 = H.map_rewrite(rwa2, mapping23)
+    rwb3 = H.map_rewrite(rwb2, mapping23)
+
+    h3.rewrite(add=(rwa3['add'] + rwb3['add']), remove=(rwa3['remove'] + rwb3['remove']))
+
+    assert h1.isomorphic(h2)
+    assert h1.isomorphic(h3)
 
 if __name__ == "__main__":
     test_basic_operations()
@@ -140,3 +238,7 @@ if __name__ == "__main__":
     test_add_ones_own()
     test_rewriting()
     test_remove()
+    test_add_from()
+    test_add_removed()
+    test_rewrite_noremove_order()
+    test_rewrite_remove_order()
