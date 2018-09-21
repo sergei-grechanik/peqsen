@@ -105,7 +105,8 @@ def test_add_ones_own(data):
 @given(strategies.data())
 def test_rewriting(data):
     """Rewriting leaves graph in a consistent state. Also adding really adds and merging
-    really merges, removing is tested separately (because addition has higher priority)."""
+    really merges, removing is tested separately
+    (because addition has higher priority than removing)."""
     h = data.draw(H.gen_hypergraph())
     for i in range(2):
         rw = data.draw(H.gen_rewrite(h))
@@ -231,6 +232,52 @@ def test_rewrite_remove_order(data):
     assert h1.isomorphic(h2)
     assert h1.isomorphic(h3)
 
+@given(strategies.data())
+def test_listener(data):
+    """This tests events. Note that the integrity is non-strict."""
+    h1 = data.draw(H.gen_hypergraph())
+
+    class _L:
+        def __init__(self, to_add):
+            self.to_add = to_add
+
+        def on_add(self, hypergraph, elements):
+            hypergraph.check_integrity(False)
+            for e in elements:
+                assert e in hypergraph
+
+            self.to_add |= set(elements)
+
+        def on_merge(self, hypergraph, node, removed, added):
+            hypergraph.check_integrity(False)
+            assert node not in hypergraph
+            assert node.merged in hypergraph
+            for h in removed:
+                assert h not in hypergraph
+                assert h.merged in hypergraph
+            for h in added:
+                assert h in hypergraph
+
+            self.to_add -= set(removed)
+            self.to_add |= set(added)
+
+        def on_remove(self, hypergraph, elements):
+            hypergraph.check_integrity(False)
+            for e in elements:
+                assert e not in hypergraph
+
+            self.to_add -= set(elements)
+
+    lis = _L(set(h1.nodes()) | set(h1.hyperedges()))
+    h1.listeners.add(lis)
+
+    rw = data.draw(H.gen_rewrite(h1, max_merge=0))
+    h1.rewrite(**rw)
+
+    h2 = Hypergraph()
+    h2.rewrite(add=lis.to_add)
+    assert h1.isomorphic(h2)
+
 if __name__ == "__main__":
     test_basic_operations()
     test_simple_addition()
@@ -242,3 +289,4 @@ if __name__ == "__main__":
     test_add_removed()
     test_rewrite_noremove_order()
     test_rewrite_remove_order()
+    test_listener()

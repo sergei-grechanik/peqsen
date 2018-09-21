@@ -20,19 +20,30 @@ def some_name(obj, length=5):
         consonant = not consonant
     return res
 
-
-class Node:
+class GloballyIndexed:
     global_index = 0
+
+    @staticmethod
+    def reset_global_index():
+        GloballyIndexed.global_index = 0
+
     def __init__(self):
+        GloballyIndexed.global_index += 1
+        self._global_index = GloballyIndexed.global_index
+
+    def __hash__(self):
+        return hash(self._global_index)
+
+class Node(GloballyIndexed):
+    def __init__(self):
+        super().__init__()
         self.incoming = set()
         self.outgoing = set()
         self.to_be_removed = False
         self.merged = None
-        Node.global_index += 1
-        self.index = Node.global_index
 
     def __repr__(self):
-        return some_name(hash(self)) + str(self.index) + \
+        return some_name(hash(self)) + str(self._global_index) + \
             ("(=" + repr(self.merged) + ")" if self.merged else "")
 
     def follow(self):
@@ -40,11 +51,13 @@ class Node:
 
     def apply_map(self, mapping):
         res = mapping.get(self)
-        return self if res is None else res
+        return self.follow() if res is None else res.follow()
 
 
-class Hyperedge:
+class Hyperedge(GloballyIndexed):
     def __init__(self, label, src=None, dst=None):
+        super().__init__()
+
         if dst is None:
             dst = []
 
@@ -76,7 +89,7 @@ class Hyperedge:
             return Hyperedge(self.label, None if self.src is None else self.src.apply_map(mapping),
                              [d.apply_map(mapping) for d in self.dst])
         else:
-            return res
+            return res.follow()
 
 
 class Recursively:
@@ -116,18 +129,29 @@ class Term:
         return repr(self.hyperedge.label) + repr(self.hyperedge.dst)
 
 
+class Listener:
+    def on_add(self, hypergraph, elements):
+        pass
+    def on_merge(self, hypergraph, node, removed, added):
+        pass
+    def on_remove(self, hypergraph, elements):
+        pass
+    def on_remove_node(self, hypergraph, node, hyperedges):
+        pass
+
 class Hypergraph:
     def __init__(self):
         self._being_modified = False
         self._nodes = set()
         self._hyperedges = {}
+        self.listeners = set()
 
     def __repr__(self):
         res = object.__repr__(self) + " {\n"
         for n in self._nodes:
             res += "    " + str(n) + " {\n"
             for h in n.outgoing:
-                mark = '' if self._hyperedges[(h.label, tuple(h.dst))] is h else '! '
+                mark = '' if self._hyperedges.get((h.label, tuple(h.dst))) is h else '! '
                 res += "        " + mark + str(h) + "\n"
             res += "    }\n"
         res += "}"
@@ -139,14 +163,29 @@ class Hypergraph:
     def hyperedges(self):
         return self._hyperedges.values()
 
-    def on_add(self, elements):
-        pass
+    def __contains__(self, element):
+        if isinstance(element, Node):
+            return element in self._nodes
+        elif isinstance(element, Hyperedge):
+            return element.src in self._nodes and element in element.src.outgoing
+        else:
+            raise ValueError("Cannot check whether this is in hypergraph: {}".format(element))
 
-    def on_merge(self, node, added_hyperedges):
-        pass
+    def on_add(self, elements):
+        for l in self.listeners:
+            l.on_add(self, elements)
+
+    def on_merge(self, node, removed, added):
+        for l in self.listeners:
+            l.on_merge(self, node, removed, added)
 
     def on_remove(self, elements):
-        pass
+        for l in self.listeners:
+            l.on_remove(self, elements)
+
+    def on_remove_node(self, node, hyperedges):
+        for l in self.listeners:
+            l.on_remove_node(self, node, hyperedges)
 
     def add_from(self, hypergraph):
         to_add = \
@@ -178,15 +217,34 @@ class Hypergraph:
         add_res = self._add(add, added, to_merge, resmap)
         self.on_add(added)
 
-        removed = []
-        self._remove(remove, 1, removed, ignore_already_removed=ignore_already_removed)
-        self.on_remove(removed)
-
         self._merge(to_merge)
+
+        removed = []
+        self._remove((h.follow() for h in remove), 1, removed,
+                     ignore_already_removed=ignore_already_removed)
+        self.on_remove(removed)
 
         self._being_modified = False
 
         return [e.follow() for e in add_res]
+
+    def remove_node(self, node):
+        if self._being_modified:
+            raise RuntimeError("Trying to modify a hypergraph during another modification")
+
+        if node in self._nodes:
+            self._being_modified = True
+
+            removed = []
+            for h in list(itertools.chain(node.incoming, node.outgoing)):
+                self._remove_hyperedge(h, 0, [])
+                self._remove_hyperedge(h, 1, removed)
+            self._nodes.remove(node)
+            self.on_remove_node(node, removed)
+
+            self._being_modified = False
+        else:
+            raise ValueError("Cannot remove a node which is not in the hypergraph: {}".format(node))
 
     def _remove(self, elements, phase, removed=None, ignore_already_removed=False):
         for e in elements:
@@ -203,22 +261,6 @@ class Hypergraph:
                 self._remove_hyperedge(e, phase, removed)
             else:
                 raise ValueError("Cannot remove a thing of unknown type: {}".format(e))
-
-    def _remove_node(self, node, phase):
-        if node in self._nodes:
-            for inc in node.incoming:
-                self._remove_hyperedge(inc, phase)
-            for out in node.outgoing:
-                self._remove_hyperedge(out, phase)
-
-            if phase == 0:
-                node.to_be_removed = True
-            elif phase == 1:
-                if node.to_be_removed:
-                    node.to_be_removed = False
-                    self._nodes.remove(node)
-        else:
-            raise ValueError("Cannot remove a node which is not in the hypergraph: {}".format(node))
 
     def _remove_hyperedge(self, hyperedge, phase, removed):
         if phase == 0:
@@ -245,6 +287,7 @@ class Hypergraph:
                 # if len(n1.incoming) + len(n1.outgoing) > len(n2.incoming) + len(n2.outgoing):
                 #     (n1, n2) = (n2, n1)
                 n1.merged = n2
+                removed = []
                 added = []
                 # This order: out then in is important
                 for h in list(itertools.chain(n1.outgoing, n1.incoming)):
@@ -261,9 +304,9 @@ class Hypergraph:
                             new_h.to_be_removed = h.to_be_removed
                             h.merged = self._add_hyperedge(new_h, added, to_merge)
                         h.to_be_removed = True
-                        self._remove_hyperedge(h, 1, [])
+                        self._remove_hyperedge(h, 1, removed)
                 self._nodes.remove(n1)
-                self.on_merge(n1, added)
+                self.on_merge(n1, removed, added)
         self._merge(to_merge)
 
     def _add(self, elements, added, to_merge, resmap):
@@ -302,6 +345,7 @@ class Hypergraph:
                     n = Node()
                     self._nodes.add(n)
                     resmap[e] = n
+                    added.append(n)
                     res.append(n)
             elif isinstance(e, (Hyperedge, Term)):
                 if isinstance(e, Term):
@@ -380,20 +424,20 @@ class Hypergraph:
         for n in self._nodes:
             assert n.merged is None
             for h in n.outgoing:
-                assert not h.to_be_removed
                 assert h.merged is None
                 assert h.src == n
                 assert all(d in self._nodes for d in h.dst)
                 assert all(h in d.incoming for d in h.dst)
                 if strict:
+                    assert not h.to_be_removed
                     assert self._hyperedges[(h.label, tuple(h.dst))] is h
             for h in n.incoming:
-                assert not h.to_be_removed
                 assert h.merged is None
                 assert h.src in self._nodes
                 assert all(d in self._nodes for d in h.dst)
                 assert all(h in d.incoming for d in h.dst)
                 if strict:
+                    assert not h.to_be_removed
                     assert self._hyperedges[(h.label, tuple(h.dst))] is h
         for h in self.hyperedges():
             assert h.src in self._nodes
@@ -416,8 +460,10 @@ def map_rewrite(rewrite, mapping):
             'add': [x.apply_map(mapping) for x in rewrite['add']],
             'merge': [tuple(mapping[x] for x in p) for p in rewrite['merge']]}
 
+DEFAULT_MAX_CHILDREN=4
+
 @strategies.composite
-def gen_hyperedge(draw, nodes, labels=['a', 'b'], max_children=10):
+def gen_hyperedge(draw, nodes, labels=['a', 'b'], max_children=DEFAULT_MAX_CHILDREN):
     if isinstance(labels, (list, tuple)):
         labels = strategies.sampled_from(labels)
     if isinstance(nodes, (list, tuple)):
@@ -429,7 +475,7 @@ def gen_hyperedge(draw, nodes, labels=['a', 'b'], max_children=10):
 
 @strategies.composite
 def gen_simple_addition(draw, labels=['a', 'b'],
-                        max_nodes=10, max_hyperedges=100, max_children=5):
+                        max_nodes=10, max_hyperedges=100, max_children=DEFAULT_MAX_CHILDREN):
     nodes = [Node() for i in range(draw(strategies.integers(0, max_nodes)))]
     hyperedges = draw(strategies.lists(gen_hyperedge(nodes, labels, max_children),
                                        max_size=max_hyperedges))
@@ -437,7 +483,7 @@ def gen_simple_addition(draw, labels=['a', 'b'],
 
 @strategies.composite
 def gen_rewrite(draw, hypergraph, labels=['a', 'b'],
-                max_add_nodes=10, max_add_hyperedges=20, max_children=5,
+                max_add_nodes=10, max_add_hyperedges=20, max_children=DEFAULT_MAX_CHILDREN,
                 max_remove=20, max_merge=20):
     add_nodes = [Node() for i in range(draw(strategies.integers(0, max_add_nodes)))]
     nodes = list(hypergraph.nodes())
@@ -454,7 +500,7 @@ def gen_rewrite(draw, hypergraph, labels=['a', 'b'],
 
 @strategies.composite
 def gen_hypergraph(draw, labels=strategies.sampled_from(['a', 'b']),
-                   max_nodes=10, max_hyperedges=100, max_children=5):
+                   max_nodes=10, max_hyperedges=100, max_children=DEFAULT_MAX_CHILDREN):
     to_add = draw(gen_simple_addition(labels=labels,
                                       max_nodes=max_nodes,
                                       max_hyperedges=max_hyperedges,
