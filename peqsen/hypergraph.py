@@ -228,23 +228,29 @@ class Hypergraph:
 
         return [e.follow() for e in add_res]
 
-    def remove_node(self, node):
+    def remove_nodes(self, nodes):
         if self._being_modified:
             raise RuntimeError("Trying to modify a hypergraph during another modification")
 
-        if node in self._nodes:
-            self._being_modified = True
+        if isinstance(nodes, Node):
+            nodes = [nodes]
 
-            removed = []
-            for h in list(itertools.chain(node.incoming, node.outgoing)):
-                self._remove_hyperedge(h, 0, [])
-                self._remove_hyperedge(h, 1, removed)
-            self._nodes.remove(node)
-            self.on_remove_node(node, removed)
+        for n in nodes:
+            if n in self._nodes:
+                self._being_modified = True
 
-            self._being_modified = False
-        else:
-            raise ValueError("Cannot remove a node which is not in the hypergraph: {}".format(node))
+                removed = []
+                for h in list(itertools.chain(n.incoming, n.outgoing)):
+                    if h in h.src.outgoing:
+                        self._remove_hyperedge(h, 0, [])
+                        self._remove_hyperedge(h, 1, removed)
+                self._nodes.remove(n)
+                self.on_remove_node(n, removed)
+
+                self._being_modified = False
+            else:
+                raise ValueError("Cannot remove a node which is not in the hypergraph: {}"
+                                 .format(n))
 
     def _remove(self, elements, phase, removed=None, ignore_already_removed=False):
         for e in elements:
@@ -479,7 +485,12 @@ def gen_simple_addition(draw, labels=['a', 'b'],
     nodes = [Node() for i in range(draw(strategies.integers(0, max_nodes)))]
     hyperedges = draw(strategies.lists(gen_hyperedge(nodes, labels, max_children),
                                        max_size=max_hyperedges))
-    return draw(strategies.permutations(nodes + hyperedges))
+    if draw(strategies.booleans()):
+        size = len(nodes) + len(hyperedges)
+        return draw(strategies.lists(strategies.sampled_from(nodes + hyperedges),
+                                     max_size=size, min_size=size))
+    else:
+        return draw(strategies.permutations(nodes + hyperedges))
 
 @strategies.composite
 def gen_rewrite(draw, hypergraph, labels=['a', 'b'],
@@ -499,6 +510,13 @@ def gen_rewrite(draw, hypergraph, labels=['a', 'b'],
     return {'remove': remove, 'add': add, 'merge': merge}
 
 @strategies.composite
+def gen_permuted_rewrite(draw, rewrite):
+    res = {}
+    for key in rewrite:
+        res[key] = draw(strategies.permutations(rewrite[key]))
+    return res
+
+@strategies.composite
 def gen_hypergraph(draw, labels=strategies.sampled_from(['a', 'b']),
                    max_nodes=10, max_hyperedges=100, max_children=DEFAULT_MAX_CHILDREN):
     to_add = draw(gen_simple_addition(labels=labels,
@@ -509,3 +527,119 @@ def gen_hypergraph(draw, labels=strategies.sampled_from(['a', 'b']),
     h.rewrite(add=to_add)
     return h
 
+
+# TODO: Move this class somewhere
+class BestHyperedgeTracker(Listener):
+    def __init__(self, worst_value=float("inf"), measure=None):
+        self.best = {}
+        self.worst_value = worst_value
+        if measure is None:
+            measure = BestHyperedgeTracker.size
+        self.measure = measure
+
+    @staticmethod
+    def size(hyperedge, subvalues):
+        return sum(subvalues) + 1
+
+    @staticmethod
+    def depth(hyperedge, subvalues):
+        return max([0] + subvalues) + 1
+
+    def _update_node(self, node, to_update):
+        for h in node.incoming:
+            self._update_hyperedge(h, to_update)
+
+    def _update_hyperedge(self, hyperedge, to_update):
+        value = self.measure(hyperedge, [self.best.get(d, [self.worst_value])[0]
+                                         for d in hyperedge.dst])
+        src_best = self.best.setdefault(hyperedge.src, (self.worst_value, set()))
+        if value < src_best[0]:
+            self.best[hyperedge.src] = (value, {hyperedge})
+            to_update.add(hyperedge.src)
+        elif value == src_best[0]:
+            src_best[1].add(hyperedge)
+        elif hyperedge in src_best[1]:
+            # tricky case: the size of the best hyperedge gets higher
+            src_best[1].remove(hyperedge)
+            if len(src_best[1]) == 0:
+                self.best[hyperedge.src] = (self.worst_value, set())
+                to_update.update(hyperedge.src.outgoing)
+
+    def _update(self, elements):
+        to_update = set(elements)
+        while True:
+            updating = list(to_update)
+            to_update = set()
+            for e in updating:
+                if isinstance(e, Node):
+                    self._update_node(e, to_update)
+                else:
+                    self._update_hyperedge(e, to_update)
+            if len(to_update) == 0:
+                return
+
+    def on_add(self, hypergraph, elements):
+        for e in elements:
+            if isinstance(e, Node) and not e in self.best:
+                self.best[e] = (self.worst_value, set())
+        self._update(h for h in elements if isinstance(h, Hyperedge))
+
+
+
+    def on_merge(self, hypergraph, node, removed, added):
+        # If some of the merged (removed) hyperedges were among the best,
+        # we should update them in the corresponding sets (except for the outgoings of `node')
+        for h in removed:
+            if h.src != node:
+                h_src_best_set = self.best[h.src][1]
+                if h in h_src_best_set:
+                    h_src_best_set.remove(h)
+                    h_src_best_set.add(h.merged)
+
+        # Now take care of the outgoings of node
+        n_best = self.best[node]
+        m_best = self.best[node.merged]
+        if n_best[0] < m_best[0]:
+            self.best[node.merged] = (n_best[0], set(h.merged for h in n_best[1]))
+            self._update([node.merged])
+        elif n_best[0] == m_best[0]:
+            m_best[1].update(set(h.merged for h in n_best[1]))
+
+        del self.best[node]
+
+        self._update(added)
+
+
+    def on_remove(self, hypergraph, elements):
+        for e in elements:
+            assert isinstance(e, Hyperedge)
+            if e.src in self.best:
+                src_best = self.best[e.src]
+                if e in src_best[1]:
+                    if len(src_best[1]) > 1:
+                        src_best[1].remove(e)
+                    else:
+                        self.best[e.src] = (self.worst_value, set())
+                        self._update(list(e.src.outgoing) + [e.src])
+
+
+    def on_remove_node(self, hypergraph, node, hyperedges):
+        del self.best[node]
+        self.on_remove(hypergraph, hyperedges)
+
+
+def measure_term(term, function):
+    return function(term.hyperedge, [measure_term(d, function) for d in term.dst])
+
+def finite_terms(node, max_depth=float('inf')):
+    def _finite_terms(node, history, max_depth=max_depth):
+        if len(history) >= max_depth or node in history:
+            return
+        else:
+            new_history = history | {node}
+            for h in node.outgoing:
+                for subterms in itertools.product(*[_finite_terms(d, new_history)
+                                                    for d in h.dst]):
+                    yield Term(h.label, subterms)
+
+    return _finite_terms(node, set(), max_depth)

@@ -141,14 +141,15 @@ def test_remove(data):
 @given(strategies.data())
 def test_add_from(data):
     """add_from results in isomorphic graph, and its mapping can be used to apply the
-    same transformations to each copy."""
+    same transformations to each copy. Moreover, the order of elements in the rewrite may be
+    different."""
     h1 = data.draw(H.gen_hypergraph())
     h2 = Hypergraph()
     mapping = h2.add_from(h1)
     assert h1.isomorphic(h2)
 
     rw1 = data.draw(H.gen_rewrite(h1))
-    rw2 = H.map_rewrite(rw1, mapping)
+    rw2 = H.map_rewrite(data.draw(H.gen_permuted_rewrite(rw1)), mapping)
 
     h1.rewrite(**rw1)
     h2.rewrite(**rw2)
@@ -245,6 +246,7 @@ def test_listener(data):
             hypergraph.check_integrity(False)
             for e in elements:
                 assert e in hypergraph
+                assert e not in self.to_add
 
             self.to_add |= set(elements)
 
@@ -252,31 +254,66 @@ def test_listener(data):
             hypergraph.check_integrity(False)
             assert node not in hypergraph
             assert node.merged in hypergraph
+            assert node in self.to_add
+            assert node.merged in self.to_add
             for h in removed:
                 assert h not in hypergraph
                 assert h.merged in hypergraph
+                assert h in self.to_add
             for h in added:
                 assert h in hypergraph
+                assert h not in self.to_add
 
             self.to_add -= set(removed)
+            self.to_add -= set([node])
             self.to_add |= set(added)
 
         def on_remove(self, hypergraph, elements):
             hypergraph.check_integrity(False)
             for e in elements:
                 assert e not in hypergraph
+                assert e in self.to_add
 
             self.to_add -= set(elements)
 
     lis = _L(set(h1.nodes()) | set(h1.hyperedges()))
     h1.listeners.add(lis)
 
-    rw = data.draw(H.gen_rewrite(h1, max_merge=0))
+    rw = data.draw(H.gen_rewrite(h1))
     h1.rewrite(**rw)
 
     h2 = Hypergraph()
     h2.rewrite(add=lis.to_add)
     assert h1.isomorphic(h2)
+
+@given(strategies.data())
+def test_smallest_hyperedge_tracker(data):
+    h1 = H.Hypergraph()
+    tracker1 = H.BestHyperedgeTracker()
+    tracker2 = H.BestHyperedgeTracker(measure=H.BestHyperedgeTracker.depth)
+    h1.listeners.add(tracker1)
+    h1.listeners.add(tracker2)
+
+    for i in range(2):
+        rw = data.draw(H.gen_rewrite(h1))
+        h1.rewrite(**rw)
+        if data.draw(strategies.booleans()):
+            h1.remove_nodes(data.draw(strategies.sampled_from(list(h1.nodes()))))
+
+    h1.check_integrity()
+
+    for n in h1.nodes():
+        terms = [(H.measure_term(t, tracker1.measure), H.measure_term(t, tracker2.measure), t)
+                 for t in H.finite_terms(n)]
+        if terms:
+            (min_val1, _, min_term1) = min(terms, key=lambda x: x[0])
+            (_, min_val2, min_term2) = min(terms, key=lambda x: x[1])
+            assert min_val1 == tracker1.best[n][0]
+            assert min_val2 == tracker2.best[n][0]
+            # TODO: Check the terms themselves
+        else:
+            assert tracker1.best[n][0] == tracker1.worst_value
+            assert tracker2.best[n][0] == tracker2.worst_value
 
 if __name__ == "__main__":
     test_basic_operations()
@@ -290,3 +327,4 @@ if __name__ == "__main__":
     test_rewrite_noremove_order()
     test_rewrite_remove_order()
     test_listener()
+    test_smallest_hyperedge_tracker()
