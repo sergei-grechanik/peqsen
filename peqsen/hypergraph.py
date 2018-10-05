@@ -128,6 +128,12 @@ class Term:
     def __repr__(self):
         return repr(self.hyperedge.label) + repr(self.hyperedge.dst)
 
+    def __eq__(self, other):
+        return self.label == other.label and self.dst == other.dst
+
+    def __hash__(self):
+        return hash((self.label, tuple(self.dst)))
+
 
 class Listener:
     def on_add(self, hypergraph, elements):
@@ -467,9 +473,10 @@ def map_rewrite(rewrite, mapping):
             'merge': [tuple(mapping[x] for x in p) for p in rewrite['merge']]}
 
 DEFAULT_MAX_CHILDREN=4
+DEFAULT_LABELS=('a', 'b', 'c')
 
 @strategies.composite
-def gen_hyperedge(draw, nodes, labels=['a', 'b'], max_children=DEFAULT_MAX_CHILDREN):
+def gen_hyperedge(draw, nodes, labels=DEFAULT_LABELS, max_children=DEFAULT_MAX_CHILDREN):
     if isinstance(labels, (list, tuple)):
         labels = strategies.sampled_from(labels)
     if isinstance(nodes, (list, tuple)):
@@ -480,7 +487,7 @@ def gen_hyperedge(draw, nodes, labels=['a', 'b'], max_children=DEFAULT_MAX_CHILD
     return Hyperedge(label, src, dst)
 
 @strategies.composite
-def gen_simple_addition(draw, labels=['a', 'b'],
+def gen_simple_addition(draw, labels=DEFAULT_LABELS,
                         max_nodes=10, max_hyperedges=100, max_children=DEFAULT_MAX_CHILDREN):
     nodes = [Node() for i in range(draw(strategies.integers(0, max_nodes)))]
     hyperedges = draw(strategies.lists(gen_hyperedge(nodes, labels, max_children),
@@ -493,7 +500,7 @@ def gen_simple_addition(draw, labels=['a', 'b'],
         return draw(strategies.permutations(nodes + hyperedges))
 
 @strategies.composite
-def gen_rewrite(draw, hypergraph, labels=['a', 'b'],
+def gen_rewrite(draw, hypergraph, labels=DEFAULT_LABELS,
                 max_add_nodes=10, max_add_hyperedges=20, max_children=DEFAULT_MAX_CHILDREN,
                 max_remove=20, max_merge=20):
     add_nodes = [Node() for i in range(draw(strategies.integers(0, max_add_nodes)))]
@@ -626,6 +633,11 @@ class BestHyperedgeTracker(Listener):
     def on_remove_node(self, hypergraph, node, hyperedges):
         del self.best[node]
         self.on_remove(hypergraph, hyperedges)
+
+    def best_terms(self, node):
+        for h in self.best[node][1]:
+            for subterms in itertools.product(*[self.best_terms(d) for d in h.dst]):
+                yield Term(h.label, subterms)
 
 
 def measure_term(term, function):

@@ -289,7 +289,7 @@ def test_listener(data):
 @given(strategies.data())
 def test_smallest_hyperedge_tracker(data):
     h1 = H.Hypergraph()
-    tracker1 = H.BestHyperedgeTracker()
+    tracker1 = H.BestHyperedgeTracker(measure=H.BestHyperedgeTracker.size)
     tracker2 = H.BestHyperedgeTracker(measure=H.BestHyperedgeTracker.depth)
     h1.listeners.add(tracker1)
     h1.listeners.add(tracker2)
@@ -310,10 +310,21 @@ def test_smallest_hyperedge_tracker(data):
             (_, min_val2, min_term2) = min(terms, key=lambda x: x[1])
             assert min_val1 == tracker1.best[n][0]
             assert min_val2 == tracker2.best[n][0]
-            # TODO: Check the terms themselves
+
+            best1 = set(t for v, _, t in terms if v == min_val1)
+            best2 = set(t for _, v, t in terms if v == min_val2)
+            assert set(tracker1.best_terms(n)) == best1
+            assert set(tracker2.best_terms(n)) == best2
+
+            hypothesis.event("Number of smallest terms {}".format(len(best1)))
+            hypothesis.event("Number of shallowest terms {}".format(len(best2)))
+            hypothesis.event("Best by size == best by depth {}".format(best1 == best2))
         else:
             assert tracker1.best[n][0] == tracker1.worst_value
             assert tracker2.best[n][0] == tracker2.worst_value
+            hypothesis.event("Number of smallest terms 0")
+            hypothesis.event("Number of shallowest terms 0")
+            hypothesis.event("Best by size == best by depth True")
 
 if __name__ == "__main__":
     test_basic_operations()
