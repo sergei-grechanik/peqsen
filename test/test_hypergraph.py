@@ -1,7 +1,7 @@
-from peqsen.hypergraph import Hypergraph, Node, Hyperedge, Term, Recursively
-import peqsen.hypergraph as H
+import peqsen as E
+from peqsen import Hypergraph, Node, Hyperedge, Term, Recursively, SmallestHyperedgeTracker
 import hypothesis
-from hypothesis import given, strategies, reproduce_failure
+from hypothesis import given, strategies, reproduce_failure, seed
 
 def test_basic_operations():
     hg = Hypergraph()
@@ -36,7 +36,7 @@ def test_simple_addition(data):
     h1 = Hypergraph()
     h2 = Hypergraph()
 
-    to_add1 = data.draw(H.gen_simple_addition())
+    to_add1 = data.draw(E.gen_simple_addition())
     to_add2 = data.draw(strategies.permutations(to_add1))
 
     added1 = h1.rewrite(add=to_add1)
@@ -57,8 +57,8 @@ def test_simple_addition_twice(data):
     h1 = Hypergraph()
     h2 = Hypergraph()
 
-    to_add1 = data.draw(H.gen_simple_addition())
-    to_add2 = data.draw(H.gen_simple_addition())
+    to_add1 = data.draw(E.gen_simple_addition())
+    to_add2 = data.draw(E.gen_simple_addition())
 
     h1.rewrite(add=to_add1)
     h2.rewrite(add=data.draw(strategies.permutations(to_add1)))
@@ -77,7 +77,7 @@ def test_add_ones_own(data):
     """Adding its own edges and nodes to hypergraph will not change it"""
     h1 = Hypergraph()
     h2 = Hypergraph()
-    to_add = data.draw(H.gen_simple_addition())
+    to_add = data.draw(E.gen_simple_addition())
     h1.rewrite(add=to_add)
     h2.rewrite(add=to_add)
     assert h1.isomorphic(h2)
@@ -107,9 +107,9 @@ def test_rewriting(data):
     """Rewriting leaves graph in a consistent state. Also adding really adds and merging
     really merges, removing is tested separately
     (because addition has higher priority than removing)."""
-    h = data.draw(H.gen_hypergraph())
+    h = data.draw(E.gen_hypergraph())
     for i in range(2):
-        rw = data.draw(H.gen_rewrite(h))
+        rw = data.draw(E.gen_rewrite(h))
         added = h.rewrite(**rw)
         h.check_integrity()
 
@@ -131,8 +131,8 @@ def test_rewriting(data):
 @given(strategies.data())
 def test_remove(data):
     """Removing indeed removes"""
-    h = data.draw(H.gen_hypergraph())
-    rw = data.draw(H.gen_rewrite(h, max_add_hyperedges=0, max_merge=0))
+    h = data.draw(E.gen_hypergraph())
+    rw = data.draw(E.gen_rewrite(h, max_add_hyperedges=0, max_merge=0))
     h.rewrite(**rw)
     hyperedges = h.hyperedges()
     for h in rw['remove']:
@@ -143,13 +143,13 @@ def test_add_from(data):
     """add_from results in isomorphic graph, and its mapping can be used to apply the
     same transformations to each copy. Moreover, the order of elements in the rewrite may be
     different."""
-    h1 = data.draw(H.gen_hypergraph())
+    h1 = data.draw(E.gen_hypergraph())
     h2 = Hypergraph()
     mapping = h2.add_from(h1)
     assert h1.isomorphic(h2)
 
-    rw1 = data.draw(H.gen_rewrite(h1))
-    rw2 = H.map_rewrite(data.draw(H.gen_permuted_rewrite(rw1)), mapping)
+    rw1 = data.draw(E.gen_rewrite(h1))
+    rw2 = E.map_rewrite(data.draw(E.gen_permuted_rewrite(rw1)), mapping)
 
     h1.rewrite(**rw1)
     h2.rewrite(**rw2)
@@ -159,12 +159,12 @@ def test_add_from(data):
 @given(strategies.data())
 def test_add_removed(data):
     """Removing hyperedges and then adding the same hyperedges is noop."""
-    h1 = data.draw(H.gen_hypergraph())
+    h1 = data.draw(E.gen_hypergraph())
     h2 = Hypergraph()
     mapping = h2.add_from(h1)
 
-    rw1 = data.draw(H.gen_rewrite(h1))
-    rw2 = H.map_rewrite(rw1, mapping)
+    rw1 = data.draw(E.gen_rewrite(h1))
+    rw2 = E.map_rewrite(rw1, mapping)
     rw2['remove'] = []
 
     h1.rewrite(**rw1)
@@ -177,26 +177,26 @@ def test_add_removed(data):
 @given(strategies.data())
 def test_rewrite_noremove_order(data):
     """Rewritings that don't remove may be applied in any order"""
-    h1 = data.draw(H.gen_hypergraph())
+    h1 = data.draw(E.gen_hypergraph())
     h2 = Hypergraph()
     h3 = Hypergraph()
     mapping12 = h2.add_from(h1)
     mapping23 = h3.add_from(h2)
 
-    rwa = data.draw(H.gen_rewrite(h1, max_remove=0))
-    rwb = data.draw(H.gen_rewrite(h1, max_remove=0))
+    rwa = data.draw(E.gen_rewrite(h1, max_remove=0))
+    rwb = data.draw(E.gen_rewrite(h1, max_remove=0))
 
     h1.rewrite(**rwa)
     h1.rewrite(**rwb)
 
-    rwa2 = H.map_rewrite(rwa, mapping12)
-    rwb2 = H.map_rewrite(rwb, mapping12)
+    rwa2 = E.map_rewrite(rwa, mapping12)
+    rwb2 = E.map_rewrite(rwb, mapping12)
 
     h2.rewrite(**rwb2)
     h2.rewrite(**rwa2)
 
-    rwa3 = H.map_rewrite(rwa2, mapping23)
-    rwb3 = H.map_rewrite(rwb2, mapping23)
+    rwa3 = E.map_rewrite(rwa2, mapping23)
+    rwb3 = E.map_rewrite(rwb2, mapping23)
 
     h3.rewrite(add=(rwa3['add'] + rwb3['add']), merge=(rwa3['merge'] + rwb3['merge']))
 
@@ -207,26 +207,26 @@ def test_rewrite_noremove_order(data):
 def test_rewrite_remove_order(data):
     """Rewritings that only remove hyperedges and add nodes may be applied in any order if
     we ignore already removed."""
-    h1 = data.draw(H.gen_hypergraph())
+    h1 = data.draw(E.gen_hypergraph())
     h2 = Hypergraph()
     h3 = Hypergraph()
     mapping12 = h2.add_from(h1)
     mapping23 = h3.add_from(h2)
 
-    rwa = data.draw(H.gen_rewrite(h1, max_add_hyperedges=0, max_merge=0))
-    rwb = data.draw(H.gen_rewrite(h1, max_add_hyperedges=0, max_merge=0))
+    rwa = data.draw(E.gen_rewrite(h1, max_add_hyperedges=0, max_merge=0))
+    rwb = data.draw(E.gen_rewrite(h1, max_add_hyperedges=0, max_merge=0))
 
     h1.rewrite(**rwa)
     h1.rewrite(**rwb, ignore_already_removed=True)
 
-    rwa2 = H.map_rewrite(rwa, mapping12)
-    rwb2 = H.map_rewrite(rwb, mapping12)
+    rwa2 = E.map_rewrite(rwa, mapping12)
+    rwb2 = E.map_rewrite(rwb, mapping12)
 
     h2.rewrite(**rwb2)
     h2.rewrite(**rwa2, ignore_already_removed=True)
 
-    rwa3 = H.map_rewrite(rwa2, mapping23)
-    rwb3 = H.map_rewrite(rwb2, mapping23)
+    rwa3 = E.map_rewrite(rwa2, mapping23)
+    rwb3 = E.map_rewrite(rwb2, mapping23)
 
     h3.rewrite(add=(rwa3['add'] + rwb3['add']), remove=(rwa3['remove'] + rwb3['remove']))
 
@@ -236,7 +236,7 @@ def test_rewrite_remove_order(data):
 @given(strategies.data())
 def test_listener(data):
     """This tests events. Note that the integrity is non-strict."""
-    h1 = data.draw(H.gen_hypergraph())
+    h1 = data.draw(E.gen_hypergraph())
 
     class _L:
         def __init__(self, to_add):
@@ -279,7 +279,7 @@ def test_listener(data):
     lis = _L(set(h1.nodes()) | set(h1.hyperedges()))
     h1.listeners.add(lis)
 
-    rw = data.draw(H.gen_rewrite(h1))
+    rw = data.draw(E.gen_rewrite(h1))
     h1.rewrite(**rw)
 
     h2 = Hypergraph()
@@ -288,43 +288,44 @@ def test_listener(data):
 
 @given(strategies.data())
 def test_smallest_hyperedge_tracker(data):
-    h1 = H.Hypergraph()
-    tracker1 = H.BestHyperedgeTracker(measure=H.BestHyperedgeTracker.size)
-    tracker2 = H.BestHyperedgeTracker(measure=H.BestHyperedgeTracker.depth)
+    E.GloballyIndexed.reset_global_index()
+    h1 = E.Hypergraph()
+    tracker1 = E.SmallestHyperedgeTracker(measure=E.SmallestHyperedgeTracker.size)
+    tracker2 = E.SmallestHyperedgeTracker(measure=E.SmallestHyperedgeTracker.depth)
     h1.listeners.add(tracker1)
     h1.listeners.add(tracker2)
 
-    for i in range(2):
-        rw = data.draw(H.gen_rewrite(h1))
+    for i in range(data.draw(strategies.integers(2, 7))):
+        rw = data.draw(E.gen_rewrite(h1))
         h1.rewrite(**rw)
         if data.draw(strategies.booleans()):
             h1.remove_nodes(data.draw(strategies.sampled_from(list(h1.nodes()))))
 
-    h1.check_integrity()
+        for n in h1.nodes():
+            terms = [(E.measure_term(t, tracker1.measure), E.measure_term(t, tracker2.measure), t)
+                     for t in E.finite_terms(n)]
+            if terms:
+                (min_val1, _, min_term1) = min(terms, key=lambda x: x[0])
+                (_, min_val2, min_term2) = min(terms, key=lambda x: x[1])
+                assert min_val1 == tracker1.smallest[n][0]
+                assert min_val2 == tracker2.smallest[n][0]
 
-    for n in h1.nodes():
-        terms = [(H.measure_term(t, tracker1.measure), H.measure_term(t, tracker2.measure), t)
-                 for t in H.finite_terms(n)]
-        if terms:
-            (min_val1, _, min_term1) = min(terms, key=lambda x: x[0])
-            (_, min_val2, min_term2) = min(terms, key=lambda x: x[1])
-            assert min_val1 == tracker1.best[n][0]
-            assert min_val2 == tracker2.best[n][0]
+                smallest1 = set(t for v, _, t in terms if v == min_val1)
+                smallest2 = set(t for _, v, t in terms if v == min_val2)
+                assert set(tracker1.smallest_terms(n)) == smallest1
+                # For depth tracker will not return the full set of shallowest terms
+                assert set(tracker2.smallest_terms(n)).issubset(smallest2)
 
-            best1 = set(t for v, _, t in terms if v == min_val1)
-            best2 = set(t for _, v, t in terms if v == min_val2)
-            assert set(tracker1.best_terms(n)) == best1
-            assert set(tracker2.best_terms(n)) == best2
-
-            hypothesis.event("Number of smallest terms {}".format(len(best1)))
-            hypothesis.event("Number of shallowest terms {}".format(len(best2)))
-            hypothesis.event("Best by size == best by depth {}".format(best1 == best2))
-        else:
-            assert tracker1.best[n][0] == tracker1.worst_value
-            assert tracker2.best[n][0] == tracker2.worst_value
-            hypothesis.event("Number of smallest terms 0")
-            hypothesis.event("Number of shallowest terms 0")
-            hypothesis.event("Best by size == best by depth True")
+                hypothesis.event("Number of smallest terms {}".format(len(smallest1)))
+                hypothesis.event("Number of shallowest terms {}".format(len(smallest2)))
+                hypothesis.event("Smallest by size == smallest by depth {}"
+                                 .format(smallest1 == smallest2))
+            else:
+                assert tracker1.smallest[n][0] == tracker1.worst_value
+                assert tracker2.smallest[n][0] == tracker2.worst_value
+                hypothesis.event("Number of smallest terms 0")
+                hypothesis.event("Number of shallowest terms 0")
+                hypothesis.event("Smallest by size == smallest by depth True")
 
 if __name__ == "__main__":
     test_basic_operations()

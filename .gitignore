@@ -1,6 +1,6 @@
 tags
 .ycm_extra_conf.py
-_*
+_trace
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
