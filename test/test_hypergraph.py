@@ -327,6 +327,25 @@ def test_smallest_hyperedge_tracker(data):
                 hypothesis.event("Number of shallowest terms 0")
                 hypothesis.event("Smallest by size == smallest by depth True")
 
+@given(strategies.data())
+def test_acyclic_generator(data):
+    h = data.draw(E.gen_hypergraph(acyclic=True))
+
+    checked = set()
+
+    def _check(node, history):
+        if node not in checked:
+            if node in history:
+                raise AssertionError("Recursive node detected: {}".format(node))
+            history = history + [node]
+            for h in node.outgoing:
+                for n in h.dst:
+                    _check(n, history)
+            checked.add(node)
+
+    for n in h.nodes():
+        _check(n, [])
+
 if __name__ == "__main__":
     test_basic_operations()
     test_simple_addition()
@@ -340,3 +359,4 @@ if __name__ == "__main__":
     test_rewrite_remove_order()
     test_listener()
     test_smallest_hyperedge_tracker()
+    test_acyclic_generator()

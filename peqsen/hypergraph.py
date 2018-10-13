@@ -34,6 +34,9 @@ class GloballyIndexed:
     def __hash__(self):
         return hash(self._global_index)
 
+    def __lt__(self, other):
+        return self._global_index < other._global_index
+
 class Node(GloballyIndexed):
     def __init__(self):
         super().__init__()
@@ -472,25 +475,35 @@ def map_rewrite(rewrite, mapping):
             'add': [x.apply_map(mapping) for x in rewrite['add']],
             'merge': [tuple(mapping[x] for x in p) for p in rewrite['merge']]}
 
-DEFAULT_MAX_CHILDREN=4
-DEFAULT_LABELS=('a', 'b', 'c')
+DEFAULT_SIGNATURE={label: strategies.integers(0, 4) for label in ['A', 'B', 'C']}
 
 @strategies.composite
-def gen_hyperedge(draw, nodes, labels=DEFAULT_LABELS, max_children=DEFAULT_MAX_CHILDREN):
-    if isinstance(labels, (list, tuple)):
-        labels = strategies.sampled_from(labels)
+def gen_hyperedge(draw, nodes, signature=DEFAULT_SIGNATURE, acyclic=False):
+    if isinstance(signature, dict):
+        label = draw(strategies.sampled_from(sorted(signature.keys())))
+        dst_size = draw(signature[label])
     if isinstance(nodes, (list, tuple)):
-        nodes = strategies.sampled_from(nodes)
-    src = draw(nodes)
-    dst = draw(strategies.lists(nodes, max_size=max_children))
-    label = draw(labels)
+        nodes_strat = strategies.sampled_from(nodes)
+    else:
+        nodes_strat = nodes
+    src = draw(nodes_strat)
+    if acyclic:
+        if isinstance(nodes, (list, tuple)):
+            filtnodes = [n for n in nodes if n < src]
+            dst = draw(strategies.lists(strategies.sampled_from(filtnodes),
+                                        max_size=dst_size, min_size=dst_size))
+        else:
+            dst = draw(strategies.lists(nodes_strat.filter(lambda n: n < src),
+                                        max_size=dst_size, min_size=dst_size))
+    else:
+        dst = draw(strategies.lists(nodes_strat, max_size=dst_size, min_size=dst_size))
     return Hyperedge(label, src, dst)
 
 @strategies.composite
-def gen_simple_addition(draw, labels=DEFAULT_LABELS,
-                        max_nodes=10, max_hyperedges=100, max_children=DEFAULT_MAX_CHILDREN):
+def gen_simple_addition(draw, signature=DEFAULT_SIGNATURE,
+                        max_nodes=10, max_hyperedges=100, acyclic=False):
     nodes = [Node() for i in range(draw(strategies.integers(0, max_nodes)))]
-    hyperedges = draw(strategies.lists(gen_hyperedge(nodes, labels, max_children),
+    hyperedges = draw(strategies.lists(gen_hyperedge(nodes, signature, acyclic=acyclic),
                                        max_size=max_hyperedges))
     if draw(strategies.booleans()):
         size = len(nodes) + len(hyperedges)
@@ -500,13 +513,12 @@ def gen_simple_addition(draw, labels=DEFAULT_LABELS,
         return draw(strategies.permutations(nodes + hyperedges))
 
 @strategies.composite
-def gen_rewrite(draw, hypergraph, labels=DEFAULT_LABELS,
-                max_add_nodes=10, max_add_hyperedges=20, max_children=DEFAULT_MAX_CHILDREN,
+def gen_rewrite(draw, hypergraph, signature=DEFAULT_SIGNATURE,
+                max_add_nodes=10, max_add_hyperedges=20,
                 max_remove=20, max_merge=20):
     add_nodes = [Node() for i in range(draw(strategies.integers(0, max_add_nodes)))]
     nodes = list(hypergraph.nodes())
-    add_hyperedges = draw(strategies.lists(gen_hyperedge(add_nodes + nodes,
-                                                         labels=labels, max_children=max_children),
+    add_hyperedges = draw(strategies.lists(gen_hyperedge(add_nodes + nodes, signature=signature),
                                            max_size=max_add_hyperedges))
     hyperedges = list(hypergraph.hyperedges())
     remove = draw(strategies.lists(strategies.sampled_from(hyperedges), max_size=max_remove))
@@ -524,12 +536,12 @@ def gen_permuted_rewrite(draw, rewrite):
     return res
 
 @strategies.composite
-def gen_hypergraph(draw, labels=strategies.sampled_from(['a', 'b']),
-                   max_nodes=10, max_hyperedges=100, max_children=DEFAULT_MAX_CHILDREN):
-    to_add = draw(gen_simple_addition(labels=labels,
+def gen_hypergraph(draw, signature=DEFAULT_SIGNATURE,
+                   max_nodes=10, max_hyperedges=100, acyclic=False):
+    to_add = draw(gen_simple_addition(signature=signature,
                                       max_nodes=max_nodes,
                                       max_hyperedges=max_hyperedges,
-                                      max_children=max_children))
+                                      acyclic=acyclic))
     h = Hypergraph()
     h.rewrite(add=to_add)
     return h
