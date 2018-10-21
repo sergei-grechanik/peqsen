@@ -112,6 +112,7 @@ class Term:
             dst = []
 
         self.hyperedge = Hyperedge(label, None, dst)
+        self._hash = hash((self.label, tuple(self.dst)))
 
     @property
     def outgoing(self):
@@ -132,10 +133,10 @@ class Term:
         return repr(self.hyperedge.label) + repr(self.hyperedge.dst)
 
     def __eq__(self, other):
-        return self.label == other.label and self.dst == other.dst
+        return self is other or (self.label == other.label and self.dst == other.dst)
 
     def __hash__(self):
-        return hash((self.label, tuple(self.dst)))
+        return self._hash
 
 
 class Listener:
@@ -218,7 +219,7 @@ class Hypergraph:
         if isinstance(remove, (Hyperedge, Node)):
             remove = [remove]
 
-        if isinstance(add, (Node, Hyperedge, Term)):
+        if isinstance(add, (Node, Hyperedge, Term, Recursively)):
             add = [add]
 
         remove = [e.follow() for e in remove]
@@ -343,6 +344,12 @@ class Hypergraph:
         self._merge(to_merge)
 
     def _add(self, elements, added, to_merge, resmap):
+        """Add `elements` which may be nodes, hyperedges, terms and elements to add recursively
+        The result is a list of corresponding added (or already existing) elements
+        - `added` is augmented with newly added stuff (which didn't exist in the graph before)
+        - `to_merge` is augmented with pairs of nodes to merge as a result of this addition
+        - `resmap` is augmented with mapping from the given elements (or their descendants in
+          the case of Recursive) to the corresponding graph elements."""
         res = []
         for e in elements:
             recursively = False
@@ -352,16 +359,23 @@ class Hypergraph:
 
             if isinstance(e, Node):
                 if e in self._nodes:
+                    # If it is already in the graph, nothing to do, even if `recursively`,
+                    # because in this case all its descendants are in the graph too
                     res.append(e)
                 elif e in resmap:
                     n = resmap[e]
                     if n is None:
+                        # This case means that we are adding the node recursively and we reached
+                        # the same node along some cyclic path, but we haven't
+                        # added any corresponding node yet, so just add a node
                         n = Node()
                         self._nodes.add(n)
                         added.append(n)
                         resmap[e] = n
                     res.append(resmap[e])
-                elif recursively:
+                elif recursively and len(e.outgoing) > 0:
+                    # Note that if there are no outgoing hyperedges then there's nothing to do
+                    # recursively
                     resmap[e] = None
                     for h in e.outgoing:
                         if h.src is not None and h.src != e:
@@ -578,8 +592,12 @@ def gen_hypergraph(draw, signature=DEFAULT_SIGNATURE,
     h.rewrite(add=to_add)
     return h
 
+
+# TODO: Currently the second component, the hypergraph, may contain non-descendants of the root
 @strategies.composite
 def gen_pattern(draw, signature=DEFAULT_SIGNATURE, max_nodes=5, max_hyperedges=20):
+    """A pattern is a rooted acyclic (no directed cycles) hypergraph, possibly
+    non-congruently-closed. Note that each sample is a pair (Node, Hypergraph)."""
     to_add = draw(gen_simple_addition(signature=signature,
                                       min_nodes=1,
                                       max_nodes=max_nodes,
