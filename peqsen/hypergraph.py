@@ -138,6 +138,9 @@ class Term:
     def __hash__(self):
         return self._hash
 
+    def __lt__(self, other):
+        return self.label < other.label or tuple(self.dst) < tuple(other.dst)
+
 
 class Listener:
     def on_add(self, hypergraph, elements):

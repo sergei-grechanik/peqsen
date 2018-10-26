@@ -50,6 +50,24 @@ def test_pattern_self_match(data):
         m_new = {k: m[k].follow() for k in m}
         assert m_new in matches2
 
+@reproduce_failure('3.73.3', b'AAIBAAECAAABAQABAAAA')
+@given(strategies.data())
+def test_trigger_manager_nondestructive(data):
+    h = Hypergraph()
+    p, hp = data.draw(gen_pattern())
+    hypothesis.assume(p.outgoing)
+    trigman = TriggerManager(h)
+    trig_matches = []
+    trigman.add_trigger(p, lambda m: trig_matches.append(m))
+
+    rw = data.draw(gen_rewrite(h, max_remove=0))
+    h.rewrite(**rw)
+    matches = list(find_matches(h, p))
+    print("matches", matches)
+    print("trig_matches", trig_matches)
+    assert len(matches) == len(trig_matches)
+
 if __name__ == "__main__":
-    test_find_matches()
-    test_pattern_self_match()
+    # test_find_matches()
+    # test_pattern_self_match()
+    test_trigger_manager_nondestructive()
