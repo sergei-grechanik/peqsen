@@ -548,19 +548,22 @@ def gen_hyperedge(draw, nodes, signature=DEFAULT_SIGNATURE, acyclic=False):
 
 @strategies.composite
 def gen_simple_addition(draw, signature=DEFAULT_SIGNATURE,
-                        min_nodes=0, max_nodes=10, max_hyperedges=100, acyclic=False):
+                        min_nodes=0, max_nodes=10, min_hyperedges=0,
+                        max_hyperedges=100, acyclic=False):
     nodes = [Node() for i in range(draw(strategies.integers(min_nodes, max_nodes)))]
     hyperedges = draw(strategies.lists(gen_hyperedge(nodes, signature, acyclic=acyclic),
+                                       min_size=min_hyperedges,
                                        max_size=max_hyperedges))
     return nodes + hyperedges
 
 @strategies.composite
 def gen_rewrite(draw, hypergraph, signature=DEFAULT_SIGNATURE,
-                max_add_nodes=10, max_add_hyperedges=20,
+                max_add_nodes=10, min_add_hyperedges=0, max_add_hyperedges=20,
                 max_remove=20, max_merge=20):
     add_nodes = [Node() for i in range(draw(strategies.integers(0, max_add_nodes)))]
     nodes = list(hypergraph.nodes())
     add_hyperedges = draw(strategies.lists(gen_hyperedge(add_nodes + nodes, signature=signature),
+                                           min_size=min_add_hyperedges,
                                            max_size=max_add_hyperedges))
     hyperedges = list(hypergraph.hyperedges())
     remove = draw(strategies.lists(strategies.sampled_from(hyperedges), max_size=max_remove))
@@ -600,14 +603,23 @@ def gen_hypergraph(draw, signature=DEFAULT_SIGNATURE,
 @strategies.composite
 def gen_pattern(draw, signature=DEFAULT_SIGNATURE, max_nodes=5, max_hyperedges=20):
     """A pattern is a rooted acyclic (no directed cycles) hypergraph, possibly
-    non-congruently-closed. Note that each sample is a pair (Node, Hypergraph)."""
+    non-congruently-closed. Note that each sample is a pair (Node, Hypergraph).
+    Moreover, the node is guaranteed to have at least one successor."""
     to_add = draw(gen_simple_addition(signature=signature,
                                       min_nodes=1,
                                       max_nodes=max_nodes,
+                                      min_hyperedges=1,
                                       max_hyperedges=max_hyperedges,
                                       acyclic=True))
     maxnode = max(n for n in to_add if isinstance(n, Node))
     maxnode_index = to_add.index(maxnode)
     h = Hypergraph(congruence=False)
     added = h.rewrite(add=to_add)
-    return added[maxnode_index], h
+    added_maxnode = added[maxnode_index]
+    if added_maxnode.outgoing:
+        return added[maxnode_index], h
+    else:
+        nonempty_nodes = [n for n in h.nodes() if n.outgoing]
+        hypothesis.assume(nonempty_nodes)
+        maxnode = max(nonempty_nodes)
+        return maxnode, h
