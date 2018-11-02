@@ -1,4 +1,6 @@
 
+import peqsen.util
+
 import itertools
 import networkx
 import hypothesis
@@ -522,7 +524,9 @@ def map_rewrite(rewrite, mapping):
             'add': [x.apply_map(mapping) for x in rewrite['add']],
             'merge': [tuple(mapping[x] for x in p) for p in rewrite['merge']]}
 
-DEFAULT_SIGNATURE={label: strategies.integers(0, 4) for label in ['A', 'B', 'C']}
+DEFAULT_SIGNATURE={'A': strategies.integers(0, 4),
+                   'B': strategies.integers(0, 4),
+                   'C': strategies.integers(0, 0)}
 
 @strategies.composite
 def gen_hyperedge(draw, nodes, signature=DEFAULT_SIGNATURE, acyclic=False):
@@ -535,8 +539,15 @@ def gen_hyperedge(draw, nodes, signature=DEFAULT_SIGNATURE, acyclic=False):
         nodes_strat = nodes
     src = draw(nodes_strat)
     if acyclic:
+        # Sometimes src is the minimal node which might be very bad, decrease chance of this
+        if dst_size > 0:
+            src_alt = draw(nodes_strat)
+            src = max(src, src_alt)
         if isinstance(nodes, (list, tuple)):
             filtnodes = [n for n in nodes if n < src]
+            if not filtnodes:
+                # We have to do this, although we might generate stuff inconsistent with signature
+                dst_size = 0
             dst = draw(strategies.lists(strategies.sampled_from(filtnodes),
                                         max_size=dst_size, min_size=dst_size))
         else:

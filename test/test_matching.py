@@ -4,6 +4,8 @@ from peqsen import *
 import hypothesis
 from hypothesis import given, strategies, reproduce_failure, seed
 
+import sys
+
 @given(strategies.data())
 def test_find_matches(data):
     h = data.draw(gen_hypergraph())
@@ -59,7 +61,6 @@ def list_of_matches_equal(matches1, matches2):
             return False
     return True
 
-@reproduce_failure('3.73.3', b'AXicY2ZkYGZkZGBgZOACkkCKmQETMLICCQADkQAg')
 @given(strategies.data())
 def test_trigger_manager_nondestructive(data):
     GloballyIndexed.reset_global_index()
@@ -70,24 +71,47 @@ def test_trigger_manager_nondestructive(data):
     trig_matches = []
     trigman.add_trigger(p, lambda m: trig_matches.append(m))
 
-    for i in range(3):
+    for i in range(5):
         rw = data.draw(gen_rewrite(h, max_remove=0))
-        print()
-        print("Curent hypergraph")
-        print(h)
-        print(rw)
-        print()
         h.rewrite(**rw)
         matches = list(find_matches(h, p))
         trig_matches = [match_follow(m) for m in trig_matches]
-        print()
-        print(h)
-        print("matches", matches)
-        print("trig_matches", trig_matches)
-        print()
         assert list_of_matches_equal(matches, trig_matches)
+
+    hypothesis.event("Final number of matches {}".format(len(matches)))
+
+@reproduce_failure('3.73.3', b'AXicY2RiZGJgZGBgYgSSTAwMDIxADowCS0H4QAAAAqEAFw==')
+@given(strategies.data())
+def test_trigger_manager_nondestructive_multipattern(data):
+    GloballyIndexed.reset_global_index()
+
+    h = Hypergraph()
+    plist = data.draw(strategies.lists(gen_pattern(), min_size=1, max_size=4))
+    trigman = TriggerManager(h)
+    trig_matches = [[] for _ in plist]
+    for i, (p, hp) in enumerate(plist):
+        trigman.add_trigger(p, lambda m, i=i: trig_matches[i].append(m))
+
+    for i in range(4):
+        rw = data.draw(gen_rewrite(h, max_remove=0))
+        # print()
+        # print("Curent hypergraph")
+        # print(h)
+        # print(rw)
+        # print()
+        h.rewrite(**rw)
+        for trigm, (p, _) in zip(trig_matches, plist):
+            matches = list(find_matches(h, p))
+            trigm = [match_follow(m) for m in trigm]
+            # print()
+            # print(h)
+            # print("matches", matches)
+            # print("trig_matches", trigm)
+            # print()
+            assert list_of_matches_equal(matches, trigm)
 
 if __name__ == "__main__":
     # test_find_matches()
     # test_pattern_self_match()
-    test_trigger_manager_nondestructive()
+    # test_trigger_manager_nondestructive()
+    test_trigger_manager_nondestructive_multipattern()
