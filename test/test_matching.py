@@ -18,6 +18,7 @@ def test_find_matches(data):
         for pe, he in m.items():
             assert pe in hp
             assert he in h
+        assert still_match(m, h)
 
     # adding and merging doesn't lead to matches' disappearing
     rw = data.draw(gen_rewrite(h, max_remove=0))
@@ -26,7 +27,7 @@ def test_find_matches(data):
 
     # if we then follow the elements, we get one of the new matches
     for m in matches:
-        m_new = {k: m[k].follow() for k in m}
+        m_new = match_follow(m)
         assert m_new in matches2
 
 @given(strategies.data())
@@ -112,24 +113,16 @@ def test_trigger_manager_destructive(data):
     for i, (p, hp) in enumerate(plist):
         trigman.add_trigger(p, lambda m, i=i: trig_matches[i].append(m))
 
-    for i in range(4):
+    for i in range(6):
         rw = data.draw(gen_rewrite(h))
-        # print()
-        # print("Curent hypergraph")
-        # print(h)
-        # print(rw)
-        # print()
         h.rewrite(**rw)
         for trigm, (p, _) in zip(trig_matches, plist):
             matches = list(find_matches(h, p))
-            trigm = [match_follow(m) for m in trigm]
-            # print()
-            # print(h)
-            # print("matches", matches)
-            # print("trig_matches", trigm)
-            # print()
-            assert list_of_matches_equal(matches, trigm)
+            trigm_f = [match_follow(m) for m in trigm]
+            trigm_f = [m for m in trigm_f if still_match(m, h)]
             trigm.clear()
+            trigm.extend(trigm_f)
+            assert list_of_matches_equal(matches, trigm_f)
 
 
 @given(strategies.data())
@@ -147,9 +140,9 @@ def test_pattern_stats(data):
     hypothesis.event("Hyperedges: " + str(_hyperedges(p)))
 
 if __name__ == "__main__":
-    test_find_matches()
-    test_pattern_self_match()
-    test_trigger_manager_nondestructive()
-    test_trigger_manager_nondestructive_multipattern()
-    # test_trigger_manager_destructive()
-    test_pattern_stats()
+    # test_find_matches()
+    # test_pattern_self_match()
+    # test_trigger_manager_nondestructive()
+    # test_trigger_manager_nondestructive_multipattern()
+    test_trigger_manager_destructive()
+    # test_pattern_stats()

@@ -308,7 +308,54 @@ class TriggerManager(Listener):
         self.on_add(hypergraph, (h for h in added if node.merged in h.dst))
 
     def on_remove(self, hypergraph, elements):
-        pass
+        to_remove_node_matches = []
+        for h in elements:
+            multerms_to_edgesetlists = self._node_to_multerms_to_edgesetlists.get(h.src)
+            if multerms_to_edgesetlists:
+                for multerm, edgesetlist in multerms_to_edgesetlists.items():
+                    was_full = True
+                    became_unfull = False
+                    for term, edgeset in zip(multerm.terms, edgesetlist):
+                        if edgeset:
+                            new_edgeset = [e for e in (e.follow() for e in edgeset) if e != h]
+                            edgeset.clear()
+                            edgeset.update(new_edgeset)
+                            if not edgeset:
+                                became_unfull = True
+                        else:
+                            was_full = False
+                    if was_full and became_unfull:
+                        to_remove_node_matches.append((h.src, multerm))
+
+        for node, multerm in to_remove_node_matches:
+            self._on_remove_node_matches(node, multerm)
+
+    def _on_remove_node_matches(self, node, multerm):
+        # Note that here all matches of the multerm are removed, not some matches, and this is
+        # the difference with adding matches
+        for pmult, h_idx, d_idx in self._multerms_to_parents[multerm]:
+            printind("Checking parent", pmult, h_idx, d_idx)
+            # Same as in add, check if any incoming hyperedge may correspond to this term
+            for h in node.incoming:
+                # We check the label, dst len and whether the d_idx dst is really this node
+                if len(h.dst) == len(pmult.terms[h_idx].dst) and h.dst[d_idx] == node and\
+                        h.label == pmult.terms[h_idx].label:
+                    # Now this hyperedge can't match the term
+                    self._on_remove_hyperedge_matches(h, pmult, h_idx)
+
+    def _on_remove_hyperedge_matches(self, hyperedge, multerm, h_idx):
+        multerms_to_edgesetlists = self._node_to_multerms_to_edgesetlists.get(hyperedge.src)
+        if multerms_to_edgesetlists:
+            edgesetlist = multerms_to_edgesetlists.get(multerm)
+            if edgesetlist:
+                edgeset = edgesetlist[h_idx]
+                if edgeset:
+                    new_edgeset = [e for e in (e.follow() for e in edgeset) if e != hyperedge]
+                    edgeset.clear()
+                    edgeset.update(new_edgeset)
+                    if not edgeset:
+                        self._on_remove_node_matches(hyperedge.src, multerm)
+
     def on_remove_node(self, hypergraph, node, hyperedges):
         pass
 
@@ -350,3 +397,12 @@ def find_matches(hypergraph, pattern, label_matcher=eq_label_matcher):
 
 def match_follow(match):
     return {k: v.follow() for k, v in match.items()}
+
+def still_match(match, hypergraph):
+    """Check if all the hyperedges and nodes participating in the match are still present in
+    the hypergraph. Note that it doesn't check if it is really a match."""
+    for v in match.values():
+        if v not in hypergraph:
+            return False
+    return True
+
