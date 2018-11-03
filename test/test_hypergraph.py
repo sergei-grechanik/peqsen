@@ -332,17 +332,29 @@ def test_smallest_hyperedge_tracker(data):
         h1.listeners.add(tracker1)
         h1.listeners.add(tracker2)
 
-        for i in range(data.draw(strategies.integers(2, 7))):
+        max_number_of_smallest = 0
+        there_was_by_size_ineq_by_depth = False
+
+        for i in range(data.draw(strategies.integers(2, 5))):
             rw = data.draw(PE.gen_rewrite(h1))
             h1.rewrite(**rw)
             if data.draw(strategies.booleans()):
                 h1.remove_nodes(data.draw(strategies.sampled_from(list(h1.nodes()))))
 
             for n in h1.nodes():
-                terms = [(PE.measure_term(t, tracker1.measure),
-                          PE.measure_term(t, tracker2.measure),
-                          t)
-                         for t in PE.finite_terms(n)]
+                # TODO: Sometimes there are just too many terms. In this case we assume false
+                # but this isn't very elegant. A better approach is to find smallest terms instead
+                # of enumerating all terms.
+                terms = []
+                for t in PE.finite_terms(n):
+                    i = i + 1
+                    if i > 1000:
+                        print("Ooups, too many terms")
+                        hypothesis.assume(False)
+                    terms.append((PE.measure_term(t, tracker1.measure),
+                                  PE.measure_term(t, tracker2.measure),
+                                  t))
+
                 if terms:
                     (min_val1, _, min_term1) = min(terms, key=lambda x: x[0])
                     (_, min_val2, min_term2) = min(terms, key=lambda x: x[1])
@@ -355,18 +367,17 @@ def test_smallest_hyperedge_tracker(data):
                     # For depth tracker will not return the full set of shallowest terms
                     assert set(tracker2.smallest_terms(n)).issubset(smallest2)
 
-                    hypothesis.event("Number of smallest terms {}".format(len(smallest1)))
-                    hypothesis.event("Number of smallest terms {}".format(len(smallest2)))
-                    if smallest1 == smallest2:
-                        hypothesis.event("Smallest by size == smallest by depth")
-                    else:
-                        hypothesis.event("Smallest by size != smallest by depth")
+                    max_number_of_smallest = max(max_number_of_smallest, len(smallest1))
+                    max_number_of_smallest = max(max_number_of_smallest, len(smallest2))
+                    if smallest1 != smallest2:
+                        there_was_by_size_ineq_by_depth = True
                 else:
                     assert tracker1.smallest[n][0] == tracker1.worst_value
                     assert tracker2.smallest[n][0] == tracker2.worst_value
-                    hypothesis.event("Number of smallest terms 0")
-                    hypothesis.event("Number of smallest terms 0")
-                    hypothesis.event("Smallest by size == smallest by depth")
+
+        hypothesis.event("Max number of smallest: " + str(max_number_of_smallest))
+        hypothesis.event("There was a node where the num of smallest by size != by depth: " +
+                         str(there_was_by_size_ineq_by_depth))
 
 @given(strategies.data())
 def test_pattern_is_acyclic(data):
@@ -389,6 +400,39 @@ def test_pattern_is_acyclic(data):
     for n in h.nodes():
         _check(n, [])
 
+
+@given(strategies.data())
+def test_stat(data):
+    """This isn't really a test. Here we simply show the stats of creating a hypergraph and
+    transforming it"""
+    PE.GloballyIndexed.reset_global_index()
+
+    h = Hypergraph()
+
+    nodes_stat = []
+    hyperedges_stat = []
+
+    for i in range(5):
+        rw = data.draw(PE.gen_rewrite(h))
+        h.rewrite(**rw)
+        nodes_stat.append(len(h.nodes()))
+        hyperedges_stat.append(len(h.hyperedges()))
+
+    def _str(val):
+        if val >= 5:
+            if val > 10:
+                return "> 10"
+            else:
+                return "5-10"
+        else:
+            return str(val)
+
+    hypothesis.event("Max nodes: " + _str(max(nodes_stat)))
+    hypothesis.event("Max hyperedges: " + _str(max(hyperedges_stat)))
+
+    # hypothesis.event("Final nodes: " + _str(len(h.nodes())))
+    # hypothesis.event("Final hyperedges: " + _str(len(h.hyperedges())))
+
 if __name__ == "__main__":
     test_basic_operations()
     test_simple_addition()
@@ -403,3 +447,4 @@ if __name__ == "__main__":
     test_listener()
     test_smallest_hyperedge_tracker()
     test_pattern_is_acyclic()
+    test_stat()

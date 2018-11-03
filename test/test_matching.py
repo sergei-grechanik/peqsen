@@ -80,7 +80,6 @@ def test_trigger_manager_nondestructive(data):
 
     hypothesis.event("Final number of matches {}".format(len(matches)))
 
-@reproduce_failure('3.73.3', b'AXicY2RiZGJgZGBgYgSSTAwMDIxADowCS0H4QAAAAqEAFw==')
 @given(strategies.data())
 def test_trigger_manager_nondestructive_multipattern(data):
     GloballyIndexed.reset_global_index()
@@ -94,6 +93,27 @@ def test_trigger_manager_nondestructive_multipattern(data):
 
     for i in range(4):
         rw = data.draw(gen_rewrite(h, max_remove=0))
+        h.rewrite(**rw)
+        for trigm, (p, _) in zip(trig_matches, plist):
+            matches = list(find_matches(h, p))
+            trigm = [match_follow(m) for m in trigm]
+            assert list_of_matches_equal(matches, trigm)
+
+    hypothesis.event("Final number of matches {}".format(sum(len(l) for l in trig_matches)))
+
+@given(strategies.data())
+def test_trigger_manager_destructive(data):
+    GloballyIndexed.reset_global_index()
+
+    h = Hypergraph()
+    plist = data.draw(strategies.lists(gen_pattern(), min_size=1, max_size=4))
+    trigman = TriggerManager(h)
+    trig_matches = [[] for _ in plist]
+    for i, (p, hp) in enumerate(plist):
+        trigman.add_trigger(p, lambda m, i=i: trig_matches[i].append(m))
+
+    for i in range(4):
+        rw = data.draw(gen_rewrite(h))
         # print()
         # print("Curent hypergraph")
         # print(h)
@@ -109,9 +129,27 @@ def test_trigger_manager_nondestructive_multipattern(data):
             # print("trig_matches", trigm)
             # print()
             assert list_of_matches_equal(matches, trigm)
+            trigm.clear()
+
+
+@given(strategies.data())
+def test_pattern_stats(data):
+    h = data.draw(gen_hypergraph())
+    p, hp = data.draw(gen_pattern())
+    hypothesis.event("Outgoing: " + str(len(p.outgoing)))
+
+    def _hyperedges(pat):
+        if isinstance(pat, Node):
+            return sum(_hyperedges(h) for h in pat.outgoing)
+        else:
+            return 1 + sum(_hyperedges(n) for n in pat.dst)
+
+    hypothesis.event("Hyperedges: " + str(_hyperedges(p)))
 
 if __name__ == "__main__":
-    # test_find_matches()
-    # test_pattern_self_match()
-    # test_trigger_manager_nondestructive()
+    test_find_matches()
+    test_pattern_self_match()
+    test_trigger_manager_nondestructive()
     test_trigger_manager_nondestructive_multipattern()
+    # test_trigger_manager_destructive()
+    test_pattern_stats()

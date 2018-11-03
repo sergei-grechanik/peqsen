@@ -77,14 +77,19 @@ class Hyperedge(GloballyIndexed):
             "->" + repr(self.dst) + \
             ("(=" + repr(self.merged) + ")" if self.merged else "")
 
-    def follow(self):
+    def follow(self, allow_copy=True):
+        """Note that sometimes this function returns a completely new hyperedge. This is ok when we
+        are adding it into a hypergraph, but there might be some corner cases, I'm not sure."""
         if self.merged is None:
-            if (self.src is None or self.src.merged is None) and \
-                    all(d.merged is None for d in self.dst):
-                return self
+            if allow_copy:
+                if (self.src is None or self.src.merged is None) and \
+                        all(d.merged is None for d in self.dst):
+                    return self
+                else:
+                    return Hyperedge(self.label, None if self.src is None else self.src.follow(),
+                                     [d.follow() for d in self.dst])
             else:
-                return Hyperedge(self.label, None if self.src is None else self.src.follow(),
-                                 [d.follow() for d in self.dst])
+                return self
         else:
             return self.merged.follow()
 
@@ -529,15 +534,19 @@ DEFAULT_SIGNATURE={'A': strategies.integers(0, 4),
                    'C': strategies.integers(0, 0)}
 
 @strategies.composite
+#@peqsen.util.traced
 def gen_hyperedge(draw, nodes, signature=DEFAULT_SIGNATURE, acyclic=False):
-    if isinstance(signature, dict):
-        label = draw(strategies.sampled_from(sorted(signature.keys())))
-        dst_size = draw(signature[label])
     if isinstance(nodes, (list, tuple)):
         nodes_strat = strategies.sampled_from(nodes)
     else:
         nodes_strat = nodes
+
+    if isinstance(signature, dict):
+        label = draw(strategies.sampled_from(sorted(signature.keys())))
+        dst_size = draw(signature[label])
+
     src = draw(nodes_strat)
+
     if acyclic:
         # Sometimes src is the minimal node which might be very bad, decrease chance of this
         if dst_size > 0:
@@ -546,7 +555,6 @@ def gen_hyperedge(draw, nodes, signature=DEFAULT_SIGNATURE, acyclic=False):
         if isinstance(nodes, (list, tuple)):
             filtnodes = [n for n in nodes if n < src]
             if not filtnodes:
-                # We have to do this, although we might generate stuff inconsistent with signature
                 dst_size = 0
             dst = draw(strategies.lists(strategies.sampled_from(filtnodes),
                                         max_size=dst_size, min_size=dst_size))
@@ -555,32 +563,48 @@ def gen_hyperedge(draw, nodes, signature=DEFAULT_SIGNATURE, acyclic=False):
                                         max_size=dst_size, min_size=dst_size))
     else:
         dst = draw(strategies.lists(nodes_strat, max_size=dst_size, min_size=dst_size))
+
     return Hyperedge(label, src, dst)
 
 @strategies.composite
+#@peqsen.util.traced
 def gen_simple_addition(draw, signature=DEFAULT_SIGNATURE,
                         min_nodes=0, max_nodes=10, min_hyperedges=0,
                         max_hyperedges=100, acyclic=False):
     nodes = [Node() for i in range(draw(strategies.integers(min_nodes, max_nodes)))]
+    if not nodes:
+        return nodes
     hyperedges = draw(strategies.lists(gen_hyperedge(nodes, signature, acyclic=acyclic),
                                        min_size=min_hyperedges,
                                        max_size=max_hyperedges))
     return nodes + hyperedges
 
 @strategies.composite
+#@peqsen.util.traced
 def gen_rewrite(draw, hypergraph, signature=DEFAULT_SIGNATURE,
-                max_add_nodes=10, min_add_hyperedges=0, max_add_hyperedges=20,
-                max_remove=20, max_merge=20):
+                max_add_nodes=5, min_add_hyperedges=0, max_add_hyperedges=20,
+                max_remove=10, max_merge=10):
     add_nodes = [Node() for i in range(draw(strategies.integers(0, max_add_nodes)))]
     nodes = list(hypergraph.nodes())
-    add_hyperedges = draw(strategies.lists(gen_hyperedge(add_nodes + nodes, signature=signature),
-                                           min_size=min_add_hyperedges,
-                                           max_size=max_add_hyperedges))
     hyperedges = list(hypergraph.hyperedges())
-    remove = draw(strategies.lists(strategies.sampled_from(hyperedges), max_size=max_remove))
-    merge = draw(strategies.lists(strategies.tuples(strategies.sampled_from(nodes),
-                                                    strategies.sampled_from(nodes)),
-                                  max_size=max_merge))
+
+    add_hyperedges = []
+    remove = []
+    merge = []
+
+    if nodes or add_nodes:
+        add_hyperedges = draw(strategies.lists(gen_hyperedge(add_nodes + nodes,
+                                                             signature=signature),
+                                               min_size=min_add_hyperedges,
+                                               max_size=max_add_hyperedges))
+
+    if nodes or hyperedges:
+        remove = draw(strategies.lists(strategies.sampled_from(hyperedges), max_size=max_remove))
+
+    if nodes:
+        merge = draw(strategies.lists(strategies.tuples(strategies.sampled_from(nodes),
+                                                        strategies.sampled_from(nodes)),
+                                      max_size=max_merge))
 
     if draw(strategies.booleans()):
         add_size = len(add_nodes) + len(add_hyperedges)
@@ -592,6 +616,7 @@ def gen_rewrite(draw, hypergraph, signature=DEFAULT_SIGNATURE,
     return {'remove': remove, 'add': add, 'merge': merge}
 
 @strategies.composite
+#@peqsen.util.traced
 def gen_permuted_rewrite(draw, rewrite):
     res = {}
     for key in rewrite:
@@ -599,6 +624,7 @@ def gen_permuted_rewrite(draw, rewrite):
     return res
 
 @strategies.composite
+#@peqsen.util.traced
 def gen_hypergraph(draw, signature=DEFAULT_SIGNATURE,
                    min_nodes=0, max_nodes=10, max_hyperedges=100, congruence=True):
     to_add = draw(gen_simple_addition(signature=signature,
@@ -612,7 +638,8 @@ def gen_hypergraph(draw, signature=DEFAULT_SIGNATURE,
 
 # TODO: Currently the second component, the hypergraph, may contain non-descendants of the root
 @strategies.composite
-def gen_pattern(draw, signature=DEFAULT_SIGNATURE, max_nodes=5, max_hyperedges=20):
+#@peqsen.util.traced
+def gen_pattern(draw, signature=DEFAULT_SIGNATURE, max_nodes=10, max_hyperedges=10):
     """A pattern is a rooted acyclic (no directed cycles) hypergraph, possibly
     non-congruently-closed. Note that each sample is a pair (Node, Hypergraph).
     Moreover, the node is guaranteed to have at least one successor."""

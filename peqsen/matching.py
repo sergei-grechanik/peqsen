@@ -3,7 +3,8 @@ import itertools
 import collections
 import attr
 import peqsen.util
-from peqsen.util import printind
+#from peqsen.util import printind
+printind = lambda *_: None
 from peqsen import Listener, Node, Hyperedge, Hypergraph, Term
 
 Multerm = attr.make_class('Multerm', ['terms'], frozen=True)
@@ -19,7 +20,7 @@ HyperedgeMatches = attr.make_class('HyperedgeMatches', ['hyperedge', 'dst'], fro
 """Used internally in TriggerManager. HyperedgeMatches is a matching of a hyperedge against a Term,
 dst must be a list of NodeMatches"""
 
-@peqsen.util.for_all_methods(peqsen.util.traced)
+#@peqsen.util.for_all_methods(peqsen.util.traced)
 class TriggerManager(Listener):
     def __init__(self, hypergraph):
         if hypergraph:
@@ -155,17 +156,18 @@ class TriggerManager(Listener):
         # Propagate the found matches up
         self._on_add_hyperedge_matches(multerm, h_idx, matches)
 
-    def _get_hyperedge_matches(self, hyperedge, term):
+    def _get_hyperedge_matches(self, hyperedge, term, check_non_null=False):
+        hyperedge = hyperedge.follow()
         submatches = []
         for submulterm, d in zip(term.dst, hyperedge.dst):
-            submatch = self._get_node_matches(d, submulterm)
+            submatch = self._get_node_matches(d, submulterm, check_non_null)
             if submatch is not None:
                 submatches.append(submatch)
             else:
                 return None
         return HyperedgeMatches(hyperedge, submatches)
 
-    def _get_node_matches(self, node, multerm):
+    def _get_node_matches(self, node, multerm, check_non_null=False):
         printind("_get_node_matches", node, multerm)
         if not multerm.terms:
             # a trivial case where we don't require any outgoing hyperedge
@@ -174,14 +176,17 @@ class TriggerManager(Listener):
         edgesetlist = self._node_to_multerms_to_edgesetlists.get(node, {}).get(multerm)
         printind("edgesetlist", edgesetlist)
         if edgesetlist is not None and all(s for s in edgesetlist):
-            return NodeMatches(node, [[self._get_hyperedge_matches(h, ph) for h in s]
+            return NodeMatches(node, [[self._get_hyperedge_matches(h, ph, True) for h in s]
                                       for ph, s in zip(multerm.terms, edgesetlist)])
+        elif check_non_null:
+            raise AssertionError("No matches for node {} and multerm {}".format(node, multerm))
         else:
             printind("result none")
             return None
 
     def _on_add_node_matches(self, multerm, matches):
         """We found new matches for a node. Propagate them up."""
+        assert len(multerm.terms) == len(matches.terms)
         # First, call callbacks
         for cb in self._multerm_callbacks.get(multerm, []):
             cb(matches)
@@ -205,6 +210,9 @@ class TriggerManager(Listener):
         """We found new matches for the term h_idx of multerm, let's propagate this information"""
         hyperedge = matches.hyperedge
 
+        assert len(multerm.terms[h_idx].dst) == len(hyperedge.dst)
+        assert len(matches.dst) == len(hyperedge.dst)
+
         # This is the list of sets of hyperedges of the src node.
         # Each set corresponds to a term and represents what hyperedges matches the term.
         src_edgesetlist = \
@@ -223,7 +231,7 @@ class TriggerManager(Listener):
                 new_matches_terms.append([matches])
             else:
                 if s:
-                    new_matches_terms.append([self._get_hyperedge_matches(h, ph) for h in s])
+                    new_matches_terms.append([self._get_hyperedge_matches(h, ph, True) for h in s])
                 else:
                     # If there is a term without matches, the whole node is without matches
                     return
@@ -289,9 +297,9 @@ class TriggerManager(Listener):
 
         # Note that we propagate this after changing the edgelists because
         # _get_hyperedge_matches may use these edgesetlist in case of recursive stuff
-        for multerm, edgesetlist in new_matches:
+        for multerm, new_edgesetlist in new_matches:
             node_matches = NodeMatches(node.merged,
-                                       [[self._get_hyperedge_matches(h, ph) for h in s]
+                                       [[self._get_hyperedge_matches(h, ph, True) for h in s]
                                         for ph, s in zip(multerm.terms, new_edgesetlist)])
             printind(node_matches)
             self._on_add_node_matches(multerm, node_matches)
