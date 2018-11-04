@@ -124,6 +124,35 @@ def test_trigger_manager_destructive(data):
             trigm.extend(trigm_f)
             assert list_of_matches_equal(matches, trigm_f)
 
+@given(strategies.data())
+def test_trigger_manager_destructive_even_nodes(data):
+    GloballyIndexed.reset_global_index()
+
+    h = Hypergraph()
+    plist = data.draw(strategies.lists(gen_pattern(), min_size=1, max_size=4))
+    trigman = TriggerManager(h)
+    trig_matches = [[] for _ in plist]
+    for i, (p, hp) in enumerate(plist):
+        trigman.add_trigger(p, lambda m, i=i: trig_matches[i].append(m))
+
+    for i in range(data.draw(strategies.integers(1, 10))):
+        if data.draw(strategies.booleans()):
+            rw = data.draw(gen_rewrite(h))
+        else:
+            rw = data.draw(gen_rewrite(h, max_remove=0))
+
+        h.rewrite(**rw)
+
+        if h.nodes() and data.draw(strategies.booleans()):
+            h.remove_nodes(data.draw(strategies.sampled_from(list(h.nodes()))))
+
+        for trigm, (p, _) in zip(trig_matches, plist):
+            matches = list(find_matches(h, p))
+            trigm_f = [match_follow(m) for m in trigm]
+            trigm_f = [m for m in trigm_f if still_match(m, h)]
+            trigm.clear()
+            trigm.extend(trigm_f)
+            assert list_of_matches_equal(matches, trigm_f)
 
 @given(strategies.data())
 def test_pattern_stats(data):
@@ -140,9 +169,10 @@ def test_pattern_stats(data):
     hypothesis.event("Hyperedges: " + str(_hyperedges(p)))
 
 if __name__ == "__main__":
-    # test_find_matches()
-    # test_pattern_self_match()
-    # test_trigger_manager_nondestructive()
-    # test_trigger_manager_nondestructive_multipattern()
+    test_find_matches()
+    test_pattern_self_match()
+    test_trigger_manager_nondestructive()
+    test_trigger_manager_nondestructive_multipattern()
     test_trigger_manager_destructive()
-    # test_pattern_stats()
+    test_trigger_manager_destructive_even_nodes()
+    test_pattern_stats()

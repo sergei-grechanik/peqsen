@@ -357,7 +357,8 @@ class TriggerManager(Listener):
                         self._on_remove_node_matches(hyperedge.src, multerm)
 
     def on_remove_node(self, hypergraph, node, hyperedges):
-        pass
+        self._node_to_multerms_to_edgesetlists.pop(node, None)
+        self.on_remove(hypergraph, [h for h in hyperedges if h.src != node])
 
 def eq_label_matcher(pattern_label, match_label):
     return pattern_label == match_label
