@@ -21,7 +21,7 @@ def test_find_matches(data):
         assert still_match(m, h)
 
     # adding and merging doesn't lead to matches' disappearing
-    rw = data.draw(gen_rewrite(h, max_remove=0))
+    rw = data.draw(gen_rewrite(h, num_remove=0))
     h.rewrite(**rw)
     matches2 = list(find_matches(h, p))
 
@@ -41,7 +41,7 @@ def test_pattern_self_match(data):
     assert len(matches) > 0
 
     # adding and merging doesn't lead to matches' disappearing
-    rw = data.draw(gen_rewrite(h, max_remove=0))
+    rw = data.draw(gen_rewrite(h, num_remove=0))
     h.rewrite(**rw)
     matches2 = list(find_matches(h, p))
     assert len(matches2) > 0
@@ -73,7 +73,7 @@ def test_trigger_manager_nondestructive(data):
     trigman.add_trigger(p, lambda m: trig_matches.append(m))
 
     for i in range(5):
-        rw = data.draw(gen_rewrite(h, max_remove=0))
+        rw = data.draw(gen_rewrite(h, num_remove=0))
         h.rewrite(**rw)
         matches = list(find_matches(h, p))
         trig_matches = [match_follow(m) for m in trig_matches]
@@ -93,7 +93,7 @@ def test_trigger_manager_nondestructive_multipattern(data):
         trigman.add_trigger(p, lambda m, i=i: trig_matches[i].append(m))
 
     for i in range(4):
-        rw = data.draw(gen_rewrite(h, max_remove=0))
+        rw = data.draw(gen_rewrite(h, num_remove=0))
         h.rewrite(**rw)
         for trigm, (p, _) in zip(trig_matches, plist):
             matches = list(find_matches(h, p))
@@ -139,7 +139,7 @@ def test_trigger_manager_destructive_even_nodes(data):
         if data.draw(strategies.booleans()):
             rw = data.draw(gen_rewrite(h))
         else:
-            rw = data.draw(gen_rewrite(h, max_remove=0))
+            rw = data.draw(gen_rewrite(h, num_remove=0))
 
         h.rewrite(**rw)
 

@@ -159,7 +159,7 @@ def test_remove(data):
     """Removing indeed removes"""
     for congruence in [True, False]:
         h = data.draw(PE.gen_hypergraph(congruence=congruence))
-        rw = data.draw(PE.gen_rewrite(h, max_add_hyperedges=0, max_merge=0))
+        rw = data.draw(PE.gen_rewrite(h, num_add_hyperedges=0, num_merge=0))
         h.rewrite(**rw)
         hyperedges = h.hyperedges()
         for h in rw['remove']:
@@ -217,8 +217,8 @@ def test_rewrite_noremove_order(data):
         mapping12 = h2.add_from(h1)
         mapping23 = h3.add_from(h2)
 
-        rwa = data.draw(PE.gen_rewrite(h1, max_remove=0))
-        rwb = data.draw(PE.gen_rewrite(h1, max_remove=0))
+        rwa = data.draw(PE.gen_rewrite(h1, num_remove=0))
+        rwb = data.draw(PE.gen_rewrite(h1, num_remove=0))
 
         h1.rewrite(**rwa)
         h1.rewrite(**rwb)
@@ -248,8 +248,8 @@ def test_rewrite_remove_order(data):
         mapping12 = h2.add_from(h1)
         mapping23 = h3.add_from(h2)
 
-        rwa = data.draw(PE.gen_rewrite(h1, max_add_hyperedges=0, max_merge=0))
-        rwb = data.draw(PE.gen_rewrite(h1, max_add_hyperedges=0, max_merge=0))
+        rwa = data.draw(PE.gen_rewrite(h1, num_add_hyperedges=0, num_merge=0))
+        rwb = data.draw(PE.gen_rewrite(h1, num_add_hyperedges=0, num_merge=0))
 
         h1.rewrite(**rwa)
         h1.rewrite(**rwb, ignore_already_removed=True)

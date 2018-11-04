@@ -529,9 +529,49 @@ def map_rewrite(rewrite, mapping):
             'add': [x.apply_map(mapping) for x in rewrite['add']],
             'merge': [tuple(mapping[x] for x in p) for p in rewrite['merge']]}
 
-DEFAULT_SIGNATURE={'A': strategies.integers(0, 4),
-                   'B': strategies.integers(0, 4),
-                   'C': strategies.integers(0, 0)}
+def gen_number(descr):
+    if isinstance(descr, int):
+        return strategies.just(descr)
+    elif isinstance(descr, tuple) and len(descr) == 2:
+        return strategies.integers(descr[0], descr[1])
+    elif isinstance(descr, (list, set)):
+        return strategies.sampled_from(descr)
+    else:
+        return descr
+
+@strategies.composite
+def gen_list(draw, value_strategy, size_descr):
+    if not value_strategy:
+        if isinstance(size_descr, int):
+            if size_descr == 0:
+                return []
+        elif isinstance(size_descr, tuple) and len(size_descr) == 2:
+            if size_descr[0] <= 0 <= size_descr[1]:
+                return []
+        elif isinstance(size_descr, (list, set)):
+            if 0 in size_descr:
+                return []
+        else:
+            size_descr = gen_number(size_descr)
+            for _ in range(10):
+                if draw(size_descr) == 0:
+                    return []
+
+        hypothesis.assume(False)
+
+    if isinstance(value_strategy, (list, set)):
+        value_strategy = strategies.sampled_from(value_strategy)
+
+    # Note that generating a list directly is more efficient than generating a size and then
+    # a list separately (probably because they use some smart heuristic for average list size)
+    if isinstance(size_descr, tuple) and len(size_descr) == 2:
+        min_size, max_size = size_descr
+    else:
+        min_size = max_size = draw(gen_number(size_descr))
+
+    return draw(strategies.lists(value_strategy, min_size=min_size, max_size=max_size))
+
+DEFAULT_SIGNATURE={'A': (0, 4), 'B': (0, 4), 'C': (0, 0)}
 
 @strategies.composite
 #@peqsen.util.traced
@@ -543,48 +583,41 @@ def gen_hyperedge(draw, nodes, signature=DEFAULT_SIGNATURE, acyclic=False):
 
     if isinstance(signature, dict):
         label = draw(strategies.sampled_from(sorted(signature.keys())))
-        dst_size = draw(signature[label])
+        dst_size_strat = gen_number(signature[label])
 
     src = draw(nodes_strat)
 
     if acyclic:
         # Sometimes src is the minimal node which might be very bad, decrease chance of this
-        if dst_size > 0:
-            src_alt = draw(nodes_strat)
-            src = max(src, src_alt)
+        src_alt = draw(nodes_strat)
+        src = max(src, src_alt)
         if isinstance(nodes, (list, tuple)):
             filtnodes = [n for n in nodes if n < src]
-            if not filtnodes:
-                dst_size = 0
-            dst = draw(strategies.lists(strategies.sampled_from(filtnodes),
-                                        max_size=dst_size, min_size=dst_size))
+            dst = draw(gen_list(filtnodes, dst_size_strat))
         else:
-            dst = draw(strategies.lists(nodes_strat.filter(lambda n: n < src),
-                                        max_size=dst_size, min_size=dst_size))
+            dst = draw(gen_list(nodes_strat.filter(lambda n: n < src), dst_size_strat))
     else:
-        dst = draw(strategies.lists(nodes_strat, max_size=dst_size, min_size=dst_size))
+        dst = draw(gen_list(nodes_strat, dst_size_strat))
 
     return Hyperedge(label, src, dst)
 
 @strategies.composite
 #@peqsen.util.traced
 def gen_simple_addition(draw, signature=DEFAULT_SIGNATURE,
-                        min_nodes=0, max_nodes=10, min_hyperedges=0,
-                        max_hyperedges=100, acyclic=False):
-    nodes = [Node() for i in range(draw(strategies.integers(min_nodes, max_nodes)))]
+                        num_nodes=(0, 10), num_hyperedges=(0, 100),
+                        acyclic=False):
+    nodes = [Node() for i in range(draw(gen_number(num_nodes)))]
     if not nodes:
         return nodes
-    hyperedges = draw(strategies.lists(gen_hyperedge(nodes, signature, acyclic=acyclic),
-                                       min_size=min_hyperedges,
-                                       max_size=max_hyperedges))
+    hyperedges = draw(gen_list(gen_hyperedge(nodes, signature, acyclic=acyclic), num_hyperedges))
     return nodes + hyperedges
 
 @strategies.composite
 #@peqsen.util.traced
 def gen_rewrite(draw, hypergraph, signature=DEFAULT_SIGNATURE,
-                max_add_nodes=5, min_add_hyperedges=0, max_add_hyperedges=20,
-                max_remove=10, max_merge=10):
-    add_nodes = [Node() for i in range(draw(strategies.integers(0, max_add_nodes)))]
+                num_add_nodes=(0, 5), num_add_hyperedges=(0, 20),
+                num_remove=(0, 10), num_merge=(0, 10)):
+    add_nodes = [Node() for i in range(draw(gen_number(num_add_nodes)))]
     nodes = list(hypergraph.nodes())
     hyperedges = list(hypergraph.hyperedges())
 
@@ -593,23 +626,21 @@ def gen_rewrite(draw, hypergraph, signature=DEFAULT_SIGNATURE,
     merge = []
 
     if nodes or add_nodes:
-        add_hyperedges = draw(strategies.lists(gen_hyperedge(add_nodes + nodes,
-                                                             signature=signature),
-                                               min_size=min_add_hyperedges,
-                                               max_size=max_add_hyperedges))
+        add_hyperedges = draw(gen_list(gen_hyperedge(add_nodes + nodes,
+                                                     signature=signature),
+                                       num_add_hyperedges))
 
     if nodes or hyperedges:
-        remove = draw(strategies.lists(strategies.sampled_from(hyperedges), max_size=max_remove))
+        remove = draw(gen_list(hyperedges, num_remove))
 
     if nodes:
-        merge = draw(strategies.lists(strategies.tuples(strategies.sampled_from(nodes),
-                                                        strategies.sampled_from(nodes)),
-                                      max_size=max_merge))
+        merge = draw(gen_list(strategies.tuples(strategies.sampled_from(nodes),
+                                                strategies.sampled_from(nodes)),
+                              num_merge))
 
     if draw(strategies.booleans()):
         add_size = len(add_nodes) + len(add_hyperedges)
-        add = draw(strategies.lists(strategies.sampled_from(add_nodes + add_hyperedges),
-                                    max_size=add_size, min_size=add_size))
+        add = draw(gen_list(add_nodes + add_hyperedges, add_size))
     else:
         add = draw(strategies.permutations(add_nodes + add_hyperedges))
 
@@ -626,11 +657,10 @@ def gen_permuted_rewrite(draw, rewrite):
 @strategies.composite
 #@peqsen.util.traced
 def gen_hypergraph(draw, signature=DEFAULT_SIGNATURE,
-                   min_nodes=0, max_nodes=10, max_hyperedges=100, congruence=True):
+                   num_nodes=(0, 10), num_hyperedges=(0, 100), congruence=True):
     to_add = draw(gen_simple_addition(signature=signature,
-                                      min_nodes=min_nodes,
-                                      max_nodes=max_nodes,
-                                      max_hyperedges=max_hyperedges))
+                                      num_nodes=num_nodes,
+                                      num_hyperedges=num_hyperedges))
     h = Hypergraph(congruence=congruence)
     h.rewrite(add=to_add)
     return h
@@ -639,15 +669,13 @@ def gen_hypergraph(draw, signature=DEFAULT_SIGNATURE,
 # TODO: Currently the second component, the hypergraph, may contain non-descendants of the root
 @strategies.composite
 #@peqsen.util.traced
-def gen_pattern(draw, signature=DEFAULT_SIGNATURE, max_nodes=10, max_hyperedges=10):
+def gen_pattern(draw, signature=DEFAULT_SIGNATURE, num_nodes=(1, 10), num_hyperedges=(1, 10)):
     """A pattern is a rooted acyclic (no directed cycles) hypergraph, possibly
     non-congruently-closed. Note that each sample is a pair (Node, Hypergraph).
     Moreover, the node is guaranteed to have at least one successor."""
     to_add = draw(gen_simple_addition(signature=signature,
-                                      min_nodes=1,
-                                      max_nodes=max_nodes,
-                                      min_hyperedges=1,
-                                      max_hyperedges=max_hyperedges,
+                                      num_nodes=num_nodes,
+                                      num_hyperedges=num_hyperedges,
                                       acyclic=True))
     maxnode = max(n for n in to_add if isinstance(n, Node))
     maxnode_index = to_add.index(maxnode)
