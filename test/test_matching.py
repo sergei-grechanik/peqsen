@@ -155,6 +155,39 @@ def test_trigger_manager_destructive_even_nodes(data):
             assert list_of_matches_equal(matches, trigm_f)
 
 @given(strategies.data())
+def test_trigger_manager_new_patterns_on_the_fly(data):
+    GloballyIndexed.reset_global_index()
+
+    h = Hypergraph()
+    trigman = TriggerManager(h)
+    trig_matches = []
+    plist = []
+
+    for i in range(data.draw(strategies.integers(1, 6))):
+        p, _ = data.draw(gen_pattern())
+        plist.append(p)
+        trig_matches.append([])
+        trigman.add_trigger(p, lambda m, i=len(trig_matches)-1: trig_matches[i].append(m))
+
+        if data.draw(strategies.booleans()):
+            rw = data.draw(gen_rewrite(h))
+        else:
+            rw = data.draw(gen_rewrite(h, num_remove=0))
+
+        h.rewrite(**rw)
+
+        if h.nodes() and data.draw(strategies.booleans()):
+            h.remove_nodes(data.draw(strategies.sampled_from(list(h.nodes()))))
+
+        for trigm, p in zip(trig_matches, plist):
+            matches = list(find_matches(h, p))
+            trigm_f = [match_follow(m) for m in trigm]
+            trigm_f = [m for m in trigm_f if still_match(m, h)]
+            trigm.clear()
+            trigm.extend(trigm_f)
+            assert list_of_matches_equal(matches, trigm_f)
+
+@given(strategies.data())
 def test_pattern_stats(data):
     h = data.draw(gen_hypergraph())
     p, hp = data.draw(gen_pattern())
@@ -175,4 +208,5 @@ if __name__ == "__main__":
     test_trigger_manager_nondestructive_multipattern()
     test_trigger_manager_destructive()
     test_trigger_manager_destructive_even_nodes()
+    test_trigger_manager_new_patterns_on_the_fly()
     test_pattern_stats()

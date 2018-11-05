@@ -43,7 +43,6 @@ class TriggerManager(Listener):
         assert len(pattern.outgoing) > 0
 
         multerm, matchlist = self._pattern_to_multerm(pattern)
-        self._add_multerm(multerm)
 
         printind("\n================")
         printind(pattern)
@@ -80,6 +79,15 @@ class TriggerManager(Listener):
                 self._add_multimerge_callback(need_merged, _on_pattern_matched)
 
         self._multerm_callbacks.setdefault(multerm, []).append(_on_this_multerm)
+
+        # Since existing nodes may match the multerm, we have to trigger the new callback
+        for n in self.hypergraph.nodes():
+            existing_matches = self._get_node_matches(n, multerm)
+            if existing_matches:
+                _on_this_multerm(existing_matches)
+
+        # We do this at the end because this will immediately trigger stuff for existing hyperedges
+        self._add_multerm(multerm)
 
     def _pattern_to_multerm(self, pattern):
         matchlist = [pattern]
@@ -125,6 +133,9 @@ class TriggerManager(Listener):
 
     def _add_multerm(self, multerm):
         """Register a multerm so that we track matches against it"""
+        # this is a dict of new callbacks, which will be used locally on existing hyperedges
+        new_callbacks = {}
+
         # We only have to register each multerm once
         if multerm not in self._multerms_to_parents:
             self._multerms_to_parents[multerm] = []
@@ -141,6 +152,14 @@ class TriggerManager(Listener):
 
                 # When a hyperedge like this appears, check if it matches
                 self._hyperedge_callbacks.setdefault((h.label, len(h.dst)), []).append(_check)
+
+                # add the same callback to the list of new ones
+                new_callbacks.setdefault((h.label, len(h.dst)), []).append(_check)
+
+        # run callbacks for existing hyperedges
+        for h in self.hypergraph.hyperedges():
+            for c in new_callbacks.get((h.label, len(h.dst)), []):
+                c(h)
 
     def _check_new_hyperedge_multerm(self, hyperedge, multerm, h_idx):
         """Check if a new hyperedge matches h_idx term of multerm and if it does, propagate all
