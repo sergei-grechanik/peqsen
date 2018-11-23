@@ -49,7 +49,7 @@ class Node(GloballyIndexed):
 
     def __repr__(self):
         return some_name(hash(self)) + str(self._global_index) + \
-            ("(=" + repr(self.merged) + ")" if self.merged else "")
+            ("(->" + repr(self.merged) + ")" if self.merged else "")
 
     def follow(self):
         return self if self.merged is None else self.merged.follow()
@@ -73,9 +73,10 @@ class Hyperedge(GloballyIndexed):
         self.merged = None
 
     def __repr__(self):
-        return repr(self.src) + "->" + repr(self.label) + "{" + some_name(hash(self), 3) + "}" + \
-            "->" + repr(self.dst) + \
-            ("(=" + repr(self.merged) + ")" if self.merged else "")
+        label = self.label if isinstance(self.label, str) else repr(self.label)
+        return "{" + some_name(hash(self), 3) + "} " + repr(self.src) + "=" + \
+            label + repr(tuple(self.dst)) + \
+            ("(->" + repr(self.merged) + ")" if self.merged else "")
 
     def follow(self, allow_copy=True):
         """Note that sometimes this function returns a completely new hyperedge. This is ok when we
@@ -137,7 +138,10 @@ class Term:
         return self
 
     def __repr__(self):
-        return repr(self.hyperedge.label) + repr(self.hyperedge.dst)
+        if isinstance(self.hyperedge.label, str):
+            return self.hyperedge.label + repr(tuple(self.hyperedge.dst))
+        else:
+            return repr(self.hyperedge.label) + repr(tuple(self.hyperedge.dst))
 
     def __eq__(self, other):
         return self is other or (self.label == other.label and self.dst == other.dst)

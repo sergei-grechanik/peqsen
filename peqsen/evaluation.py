@@ -105,7 +105,9 @@ def gen_finite_function(draw, num_elements=(1, 5), arity=(0, 3), name_len=5):
     arity = draw(gen_number(arity))
     table = draw(hypothesis.extra.numpy.arrays('int32', [num_elements] * arity,
                                                strategies.integers(0, num_elements - 1)))
-    name = "F" + some_name(hash(table.tostring()), name_len)
+
+    idx = GloballyIndexed()._global_index
+    name = "F" + some_name(hash(table.tostring()), name_len) + str(idx)
 
     def func(*args, arity=arity, table=table):
         assert len(args) == arity
@@ -115,7 +117,7 @@ def gen_finite_function(draw, num_elements=(1, 5), arity=(0, 3), name_len=5):
 
 @strategies.composite
 def gen_finite_evaluable_signature(draw, num_elements=(1, 5),
-                                   num_functions=[(1,3), (0,3), (0,10), (0,1)]):
+                                   num_functions=[(1,3), (0,3), (0,10), (0,2)]):
     """Generate an instance of EvaluableSignature.
 
     num_elements
