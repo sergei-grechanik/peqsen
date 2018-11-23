@@ -17,7 +17,7 @@ class _ParsedTermTransformer(lark.Transformer):
         return (lambda d: (f1(d), f2(d)), xs1 | xs2)
     def call(self, x):
         (lbl, args) = x
-        lbl = lbl.value
+        #lbl = lbl.value
         return ((lambda d: Term(lbl, [a[0](d) for a in args])),
                 set().union(*(a[1] for a in args)))
     def variable(self, tname):
@@ -32,11 +32,11 @@ class _ParsedTermTransformer(lark.Transformer):
 _term_parser = Lark(r"""
     ?start: term | equality
     equality: term "=" term
-    ?term: call | const | variable
+    ?term: call | const | variable | "(" term ")"
     call: LABEL_NAME arglist
     variable: VAR_NAME
     const: CONST_NAME
-    arglist: "(" [term ("," term)*] ")"
+    arglist: "(" [term ("," term)*] ","? ")"
 
     LABEL_NAME: ("_" | LETTER | DIGIT)+
     CONST_NAME: (UCASE_LETTER | DIGIT) ("_" | LETTER | DIGIT | SYMBOL)*
