@@ -15,19 +15,20 @@ def test_basic_operations():
     hg_first = hg
 
     hg = Hypergraph()
-    [ha] = hg.rewrite(add=Term('a'))
-    [hb1, hb2] = hg.rewrite(add=[Term('b', [ha.src]),
-                                 Term('b', [ha.src, ha.src])])
-    [hc1, hc2] = hg.rewrite(add=[Term(('c', hb1.src)),
-                                 Term(('c', hb2.src))])
-    hg.rewrite(merge=[(hb1.src, hb2.src)])
+    [na] = hg.rewrite(add=Term('a'))
+    [nb1, nb2] = hg.rewrite(add=[Term('b', [na]),
+                                 Term('b', [na, na])])
+    hb1 = list(nb1.outgoing)[0]
+    [nc1, nc2] = hg.rewrite(add=[Term(('c', nb1)),
+                                 Term(('c', nb2))])
+    hg.rewrite(merge=[(nb1, nb2)])
     assert not hg_first.isomorphic(hg)
     hg.rewrite(remove=[hb1])
 
     assert hg_first.isomorphic(hg)
 
     hg3 = Hypergraph()
-    hg3.rewrite(add=[Recursively(hc1.src)])
+    hg3.rewrite(add=[Recursively(nc1)])
 
     assert hg_first.isomorphic(hg3)
 

@@ -138,10 +138,11 @@ class Term:
         return self
 
     def __repr__(self):
+        args = "(" + str(self.dst[0]) + ")" if len(self.dst) == 1 else str(tuple(self.dst))
         if isinstance(self.hyperedge.label, str):
-            return self.hyperedge.label + repr(tuple(self.hyperedge.dst))
+            return self.hyperedge.label + args
         else:
-            return repr(self.hyperedge.label) + repr(tuple(self.hyperedge.dst))
+            return repr(self.hyperedge.label) + args
 
     def __eq__(self, other):
         return self is other or (self.label == other.label and self.dst == other.dst)
@@ -408,10 +409,7 @@ class Hypergraph:
                     resmap[e] = n
                     added.append(n)
                     res.append(n)
-            elif isinstance(e, (Hyperedge, Term)):
-                if isinstance(e, Term):
-                    e = e.hyperedge
-
+            elif isinstance(e, Hyperedge):
                 if recursively:
                     new_dst = self._add([Recursively(d) for d in e.dst],
                                         added, to_merge, resmap)
@@ -431,6 +429,10 @@ class Hypergraph:
 
                 resmap[e] = h
                 res.append(h)
+            elif isinstance(e, Term):
+                [new_h] = self._add([Recursively(e.hyperedge)], added, to_merge, resmap)
+                resmap[e] = new_h.src
+                res.append(new_h.src)
             else:
                 raise ValueError("Cannot add this, unknown type: {}".format(e))
         return res
@@ -577,6 +579,22 @@ def gen_list(draw, value_strategy, size_descr):
 
 DEFAULT_SIGNATURE={'A': (0, 4), 'B': (0, 4), 'C': (0, 0)}
 
+def leaf_labels(signature):
+    res = []
+    for k, v in signature.items():
+        if v == 0 or (isinstance(v, tuple) and v[0] <= 0):
+            res.append(k)
+    return sorted(res)
+
+def nonleaf_subsignature(signature):
+    res = {}
+    for k, v in signature.items():
+        if isinstance(v, tuple) and v[1] > 0:
+            res[k] = (max(v[0], 1), v[1])
+        elif isinstance(v, int) and v > 0:
+            res[k] = v
+    return res
+
 @strategies.composite
 #@peqsen.util.traced
 def gen_hyperedge(draw, nodes, signature=DEFAULT_SIGNATURE, acyclic=False):
@@ -693,3 +711,19 @@ def gen_pattern(draw, signature=DEFAULT_SIGNATURE, num_nodes=(1, 10), num_hypere
         hypothesis.assume(nonempty_nodes)
         maxnode = max(nonempty_nodes)
         return maxnode, h
+
+@strategies.composite
+#@peqsen.util.traced
+def gen_term(draw, signature=DEFAULT_SIGNATURE, max_leaves=20, max_variables=5, equality=False):
+    vars_number = draw(strategies.integers(0, max_variables))
+    leaves = [Term(l) for l in leaf_labels(signature)] + [Node() for _ in range(vars_number)]
+
+    @strategies.composite
+    #@peqsen.util.traced
+    def _extend_term(draw, subgen, sig=nonleaf_subsignature(signature)):
+        label = draw(strategies.sampled_from(sorted(sig.keys())))
+        child_len = draw(gen_number(sig[label]))
+        return Term(label, draw(strategies.lists(subgen, min_size=child_len, max_size=child_len)))
+
+    gen = strategies.recursive(strategies.sampled_from(leaves), _extend_term)
+    return draw(strategies.tuples(gen, gen)) if equality else draw(gen)
