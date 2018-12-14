@@ -2,23 +2,25 @@
 import itertools
 import collections
 import attr
+
 import peqsen.util
+# TODO: Remove all printinds
 #from peqsen.util import printind
 printind = lambda *_: None
 from peqsen import Listener, Node, Hyperedge, Hypergraph, Term
 
 Multerm = attr.make_class('Multerm', ['terms'], frozen=True)
-"""Used internally in TriggerManager. Multerm is a list of terms that can be
+Multerm.__doc__ = """Used internally in TriggerManager. Multerm is a list of terms that can be
 matched against a node, meaning that the node must have hyperedges matching these terms."""
 
 NodeMatches = attr.make_class('NodeMatches', ['node', 'terms'], frozen=True)
-"""Used internally in TriggerManager. NodeMatches is a (set of) matching of a node against a
-Multerm, terms must be a list of lists of HyperedgeMatches (that is, each term may match several
-hyperedges, so this represents a collection of matches)"""
+NodeMatches.__doc__ = """Used internally in TriggerManager. NodeMatches is a (set of) matching of a
+node against a Multerm, terms must be a list of lists of HyperedgeMatches (that is, each term may
+match several hyperedges, so this represents a collection of matches)"""
 
 HyperedgeMatches = attr.make_class('HyperedgeMatches', ['hyperedge', 'dst'], frozen=True)
-"""Used internally in TriggerManager. HyperedgeMatches is a matching of a hyperedge against a Term,
-dst must be a list of NodeMatches"""
+HyperedgeMatches.__doc__ = """Used internally in TriggerManager. HyperedgeMatches is a matching of a
+hyperedge against a Term, dst must be a list of NodeMatches"""
 
 #@peqsen.util.for_all_methods(peqsen.util.traced)
 class TriggerManager(Listener):

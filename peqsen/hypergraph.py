@@ -1,9 +1,12 @@
 
 import peqsen.util
 
+import attr
 import itertools
 import networkx
 import hypothesis
+import inspect
+
 from hypothesis import strategies
 
 def some_name(obj, length=5):
@@ -37,7 +40,10 @@ class GloballyIndexed:
         return hash(self._global_index)
 
     def __lt__(self, other):
-        return self._global_index < other._global_index
+        if isinstance(other, type(self)):
+            return self._global_index < other._global_index
+        else:
+            return NotImplemented
 
 class Node(GloballyIndexed):
     def __init__(self):
@@ -110,7 +116,13 @@ class Recursively:
     def follow(self):
         return Recursively(self.node.follow())
 
-class Term:
+class Term(Node):
+    """A Term may behave like a Node but it has a coarser equality (structural) and cannot be
+    a node of a hypergraph. It may be considered a node of some static hypergraph.
+
+    A Term may contain ordinary Nodes as leafs. Following a term or applying a map to a term means
+    following and mapping these nodes.
+    """
     def __init__(self, label, dst=None):
         if dst is None and isinstance(label, tuple):
             dst = [s if isinstance(s, (Node, Term)) else Term(s) for s in label[1:]]
@@ -119,12 +131,16 @@ class Term:
         if dst is None:
             dst = []
 
-        self.hyperedge = Hyperedge(label, None, dst)
+        self.hyperedge = Hyperedge(label, self, dst)
         self._hash = hash((self.label, tuple(self.dst)))
 
     @property
     def outgoing(self):
         return [self.hyperedge]
+
+    @property
+    def incoming(self):
+        raise RuntimeError("Getting incoming hyperedges of a Term is forbidden.")
 
     @property
     def label(self):
@@ -134,8 +150,22 @@ class Term:
     def dst(self):
         return self.hyperedge.dst
 
+    @property
+    def merged():
+        return None
+
+    @property
+    def to_be_removed():
+        return False
+
     def follow(self):
-        return self
+        return Term(self.label, [d.follow() for d in self.dst])
+
+    def apply_map(self, mapping):
+        if self in mapping:
+            raise ValueError("Mapping terms themselves is forbidden. "
+                             "The term {} is in mapping {}".format(self, mapping))
+        return Term(self.label, [d.apply_map(mapping) for d in self.dst])
 
     def __repr__(self):
         args = "(" + str(self.dst[0]) + ")" if len(self.dst) == 1 else str(tuple(self.dst))
@@ -145,13 +175,36 @@ class Term:
             return repr(self.hyperedge.label) + args
 
     def __eq__(self, other):
+        if not isinstance(other, Term):
+            return False
         return self is other or (self.label == other.label and self.dst == other.dst)
 
     def __hash__(self):
         return self._hash
 
     def __lt__(self, other):
-        return self.label < other.label or tuple(self.dst) < tuple(other.dst)
+        if isinstance(other, Term):
+            return self.label < other.label or tuple(self.dst) < tuple(other.dst)
+        elif isinstance(other, Node):
+            return False
+        else:
+            return NotImplemented
+
+
+Equality = attr.make_class('Equality', ['name', 'lhs', 'rhs', 'vars2nodes'], frozen=True)
+Equality.__doc__ = """Basically, a pair of Nodes or Terms."""
+
+def make_equality(func, name=None):
+    names = [p for p in inspect.signature(func).parameters]
+    vars2nodes = {n: Node() for n in names}
+    pair = func(*(vars2nodes[n] for n in names))
+    if len(pair) != 2:
+        raise ValueError("make_equality: func must return a pair, not {}".format(pair))
+
+    if name is None:
+        name = str(pair[0]) + " = " + str(pair[1])
+
+    return Equality(name=name, lhs=pair[0], rhs=pair[1], vars2nodes=vars2nodes)
 
 
 class Listener:
@@ -163,6 +216,7 @@ class Listener:
         pass
     def on_remove_node(self, hypergraph, node, hyperedges):
         pass
+
 
 class Hypergraph:
     def __init__(self, congruence=True):
@@ -368,6 +422,9 @@ class Hypergraph:
         res = []
         for e in elements:
             recursively = False
+            if isinstance(e, Term):
+                # Terms are always added recursively
+                e = Recursively(e)
             if isinstance(e, Recursively):
                 recursively = True
                 e = e.node
@@ -429,10 +486,6 @@ class Hypergraph:
 
                 resmap[e] = h
                 res.append(h)
-            elif isinstance(e, Term):
-                [new_h] = self._add([Recursively(e.hyperedge)], added, to_merge, resmap)
-                resmap[e] = new_h.src
-                res.append(new_h.src)
             else:
                 raise ValueError("Cannot add this, unknown type: {}".format(e))
         return res

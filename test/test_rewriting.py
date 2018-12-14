@@ -19,15 +19,18 @@ def test_parse(data):
 
 @given(strategies.data())
 def test_parse_eq(data):
-    (ta1, tb1) = data.draw(gen_term(equality=True))
-    (ta2, tb2) = parse(str(ta1) + " = " + str(tb1))
+    (eq1_lhs, eq1_rhs) = data.draw(gen_term(equality=True))
+    eq2 = parse(str(eq1_lhs) + " = " + str(eq1_rhs))
     h1 = Hypergraph()
     h2 = Hypergraph()
-    [na1, nb1] = h1.rewrite(add=[ta1, tb1])
+    [na1, nb1] = h1.rewrite(add=[eq1_lhs, eq1_rhs])
     h1.rewrite(merge=[(na1, nb1)])
-    [na2, nb2] = h2.rewrite(add=[ta2, tb2])
+    [na2, nb2] = h2.rewrite(add=[eq2.lhs, eq2.rhs])
     h2.rewrite(merge=[(na2, nb2)])
     assert h1.isomorphic(h2)
+
+def check_theory(draw, theory, evaluablesig):
+    pass
 
 @given(strategies.data())
 def test_boolean(data):
