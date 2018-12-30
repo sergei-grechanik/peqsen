@@ -163,8 +163,10 @@ class Term(Node):
 
     def apply_map(self, mapping):
         if self in mapping:
-            raise ValueError("Mapping terms themselves is forbidden. "
-                             "The term {} is in mapping {}".format(self, mapping))
+            return mapping[self]
+            # I still think this might be dangerous but I don't know what to do about it
+            #  raise ValueError("Mapping terms themselves is forbidden. "
+            #                   "The term {} is in mapping {}".format(self, mapping))
         return Term(self.label, [d.apply_map(mapping) for d in self.dst])
 
     def __repr__(self):
@@ -767,9 +769,12 @@ def gen_pattern(draw, signature=DEFAULT_SIGNATURE, num_nodes=(1, 10), num_hypere
 
 @strategies.composite
 #@peqsen.util.traced
-def gen_term(draw, signature=DEFAULT_SIGNATURE, max_leaves=20, max_variables=5, equality=False):
-    vars_number = draw(strategies.integers(0, max_variables))
-    leaves = [Term(l) for l in leaf_labels(signature)] + [Node() for _ in range(vars_number)]
+def gen_term(draw, signature=DEFAULT_SIGNATURE, max_leaves=20, max_variables=5,
+             variables=None, equality=False):
+    if variables is None:
+        vars_number = draw(strategies.integers(0, max_variables))
+        variables = [Node() for _ in range(vars_number)]
+    leaves = [Term(l) for l in leaf_labels(signature)] + variables
 
     @strategies.composite
     #@peqsen.util.traced

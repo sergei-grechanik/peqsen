@@ -39,10 +39,18 @@ class TriggerManager(Listener):
         self._multerms_to_parents = {}
         # (Label, Int) ~> [Hyperedge -> ()]
         self._hyperedge_callbacks = {}
+        # [(Node) -> ()]
+        self._node_callbacks = []
 
     def add_trigger(self, pattern, callback):
         assert isinstance(pattern, Node)
-        assert len(pattern.outgoing) > 0
+
+        if len(pattern.outgoing) == 0:
+            # special case
+            def _on_new_node(node, pattern=pattern, callback=callback):
+                callback({pattern: node})
+            self._node_callbacks.append(_on_new_node)
+            return
 
         multerm, matchlist = self._pattern_to_multerm(pattern)
 
@@ -267,6 +275,9 @@ class TriggerManager(Listener):
         for e in elements:
             if isinstance(e, Hyperedge):
                 for c in self._hyperedge_callbacks.get((e.label, len(e.dst)), []):
+                    c(e)
+            elif isinstance(e, Node):
+                for c in self._node_callbacks:
                     c(e)
 
     def on_merge(self, hypergraph, node, removed, added):

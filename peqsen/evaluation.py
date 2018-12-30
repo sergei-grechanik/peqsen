@@ -18,7 +18,14 @@ class SimpleEvaluator(Listener):
     higher-order values.
     """
 
-    def __init__(self, hypergraph, evaluate, generate, num_models=1):
+    def __init__(self, hypergraph, signature=None, data=None,
+                 evaluate=None, generate=None, num_models=1):
+        if signature is not None:
+            if evaluate is None:
+                evaluate = lambda lbl, vals, sig=signature: sig.evaluate[lbl](*vals)
+            if generate is None:
+                generate = lambda e, i, data=data, sig=signature: data.draw(sig.generate)
+
         if hypergraph:
             hypergraph.listeners.add(self)
 
@@ -36,6 +43,8 @@ class SimpleEvaluator(Listener):
         # We do this by simply creating another evaluator and adding all the nodes to it
         se = SimpleEvaluator(None, evaluate=self.evaluate, generate=generate, num_models=count)
         se.on_add(None, self._node_to_values.keys())
+
+        self._num_models += count
 
         for node, vals in se._node_to_values.items():
             self._node_to_values[node].extend(vals)
@@ -60,14 +69,20 @@ class SimpleEvaluator(Listener):
                                            "non-recursive definitions.".format(e))
             else:
                 if not e in evaluated_hyperedges:
-                    evaluated_hyperedges.add(h)
+                    evaluated_hyperedges.add(e)
                     dst_values = []
                     for d in e.dst:
                         if not d in self._node_to_values:
                             _eval(d)
-                        dst_values.append(self._node_to_values[d])
+                        d_eval = self._node_to_values[d]
+                        assert len(d_eval) == self._num_models
+                        dst_values.append(d_eval)
 
-                    computed = [self.evaluate(e.label, vals) for vals in zip(*dst_values)]
+                    if dst_values:
+                        computed = [self.evaluate(e.label, vals) for vals in zip(*dst_values)]
+                    else:
+                        computed = [self.evaluate(e.label, [])] * self._num_models
+                    assert len(computed) == self._num_models
 
                     if e.src not in self._node_to_values:
                         self._node_to_values[e.src] = computed
@@ -84,6 +99,7 @@ class SimpleEvaluator(Listener):
 
     def on_merge(self, hypergraph, node, removed, added):
         pass
+        #self.on_add(added)
 
     def on_remove(self, hypergraph, elements):
         pass

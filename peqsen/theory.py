@@ -68,7 +68,7 @@ def make_evaluable_sig(labels2funs, generate):
             evaluate[l] = f
         else:
             signature[l] = 0
-            evaluate[l] = lambda: f
+            evaluate[l] = lambda f=f: f
 
     return EvaluableSignature(signature=signature, evaluate=evaluate, generate=generate)
 
@@ -115,10 +115,10 @@ BooleanSig = \
     make_evaluable_sig(
         {'0': False,
          '1': True,
-         'neg': lambda x: not x,
+         'not': lambda x: not x,
          'and': lambda x, y: x and y,
          'or' : lambda x, y: x or y},
-        strategies.booleans)
+        strategies.booleans())
 
 BooleanExtSig = \
     extend_evaluable_sig(
@@ -130,15 +130,35 @@ BooleanExtSig = \
 BooleanTheory = \
     make_theory(
         BooleanSig.signature,
-        ["neg(0) = 1", "neg(1) = 0"] +
-        comm_assoc('or', 0) +
-        comm_assoc('and', 1) +
+        ["not(0) = 1", "not(1) = 0"] +
+        comm_assoc('or', '0') +
+        comm_assoc('and', '1') +
         distrib_left('and', 'or') +
         distrib_left('or', 'and') +
-        ["or(x, neg(x)) = 1", "and(x, neg(x)) = 0"] +
+        ["or(x, not(x)) = 1", "and(x, not(x)) = 0"] +
         ["or(x, x) = x", "and(x, x) = x"] +
         ["or(1, x) = 1", "and(0, x) = 0"] +
         ["or(x, and(x, y)) = x", "and(x, or(x, y)) = x"] +
-        ["neg(or(x, y)) = and(neg(x), neg(y))", "neg(and(x, y)) = or(neg(x), neg(y))"] +
-        ["neg(neg(x)) = x"])
+        ["not(or(x, y)) = and(not(x), not(y))", "not(and(x, y)) = or(not(x), not(y))"] +
+        ["not(not(x)) = x"])
 
+BooleanExtTheory = \
+    make_theory(
+        BooleanExtSig.signature,
+        BooleanTheory.equalities +
+        ["impl(x, y) = or(not(x), y)",
+         "impl(x, impl(y, z)) = impl(impl(x, y), impl(x, z))"] +
+        comm_assoc('xor', '0') +
+        ["xor(1, x) = not(x)"] +
+        ["eq(x, y) = xor(x, y)"])
+
+IntegerSig = \
+    make_evaluable_sig(
+        {'0': 0,
+         '1': 1,
+         'add': lambda x, y: x + y,
+         'mul': lambda x, y: x * y,
+         'neg': lambda x: -x,
+         'div': lambda x, y: x//y if y >= 0 else (x - (x % (-y)))//y,
+         'mod': lambda x, y: x % y if y >= 0 else x % (-y)},
+        strategies.booleans())
