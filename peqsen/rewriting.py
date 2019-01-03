@@ -6,7 +6,11 @@ import attr
 from peqsen import Listener, Node, Hyperedge, Hypergraph, Term, TriggerManager, parse, \
     still_match, ByRule, list_term_elements
 
-Rule = attr.make_class('Rule', ['name', 'trigger', 'rewrite'], frozen=True)
+@attr.s(slots=True, frozen=True)
+class Rule:
+    name = attr.ib()
+    trigger = attr.ib()
+    rewrite = attr.ib()
 
 def equality_to_rule(equality, reverse=False, destructive=False, name=None):
     equality = parse(equality)

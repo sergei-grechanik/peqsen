@@ -117,33 +117,35 @@ class Hyperedge(GloballyIndexed):
     def with_reason(self, reason):
         return Hyperedge(self.label, self.src, self.dst, reason=reason)
 
+@attr.s(slots=True, frozen=True)
+class Term:
+    """A Term. `dst` must be a tuple of other terms or nodes"""
+    label = attr.ib()
+    dst = attr.ib(default=(), converter=tuple)
 
-Term = attr.make_class('Term', ['label', 'dst'], frozen=True)
-Term.__doc__ = """A Term. `dst` must be a tuple of other terms or nodes"""
+    def term_repr(self):
+        args = "(" + str(self.dst[0]) + ")" if len(self.dst) == 1 else str(tuple(self.dst))
+        if isinstance(self.label, str):
+            return self.label + args
+        else:
+            return repr(self.label) + args
 
-def term_repr(self):
-    args = "(" + str(self.dst[0]) + ")" if len(self.dst) == 1 else str(tuple(self.dst))
-    if isinstance(self.label, str):
-        return self.label + args
-    else:
-        return repr(self.label) + args
+    def apply_map(self, mapping):
+        if isinstance(self, Term):
+            return Term(self.label, (d.apply_map(mapping) for d in self.dst))
+        else:
+            return self.apply_map(mapping)
 
-Term.__repr__ = term_repr
-
-def term_apply_map(term, mapping):
-    if isinstance(term, Term):
-        return Term(term.label, tuple(term_apply_map(d, mapping) for d in term.dst))
-    else:
-        return term.apply_map(mapping)
-
-Term.apply_map = term_apply_map
+Term.__repr__ = Term.term_repr
 
 def term(sexpr, dst=None):
     if dst is None:
         if isinstance(sexpr, Term) or isinstance(sexpr, Node):
             return sexpr
-        else:
+        elif isinstance(sexpr, (tuple, list)):
             return Term(sexpr[0], tuple(term(t) for t in sexpr[1:]))
+        else:
+            return Term(sexpr)
     else:
         return Term(sexpr, tuple(term(t) for t in dst))
 
@@ -171,9 +173,13 @@ def list_descendants(node, history=set()):
     elif isinstance(node, Hyperedge):
         return [node] + [e for d in node.dst for e in list_descendants(d, history)]
 
-
-Equality = attr.make_class('Equality', ['name', 'lhs', 'rhs', 'vars2nodes'], frozen=True)
-Equality.__doc__ = """Basically, a pair of Nodes or Terms."""
+@attr.s(slots=True, frozen=True)
+class Equality:
+    """Basically, a pair of Nodes or Terms."""
+    name = attr.ib()
+    lhs = attr.ib()
+    rhs = attr.ib()
+    vars2nodes = attr.ib()
 
 def make_equality(func, name=None):
     names = [p for p in inspect.signature(func).parameters]
@@ -187,13 +193,19 @@ def make_equality(func, name=None):
 
     return Equality(name=name, lhs=pair[0], rhs=pair[1], vars2nodes=vars2nodes)
 
+@attr.s(slots=True, frozen=True)
+class ByCongruence:
+    """A reason for merging, contains two hyperedges."""
+    lhs = attr.ib()
+    rhs = attr.ib()
 
-ByCongruence = attr.make_class('ByCongruence', ['lhs', 'rhs'], frozen=True)
-ByCongruence.__doc__ = """A reason for merging, contains two hyperedges."""
-
-ByRule = attr.make_class('ByRule', ['rule', 'match', 'index'], frozen=True)
-ByRule.__doc__ = """A reason for adding a hyperedge by rule application, contains a rule, a match
-and an index in the `add` part of the rewriting."""
+@attr.s(slots=True, frozen=True)
+class ByRule:
+    """A reason for adding a hyperedge by rule application, contains a rule, a match and an index in
+    the `add` part of the rewriting."""
+    rule = attr.ib()
+    match = attr.ib()
+    index = attr.ib()
 
 
 class Listener:

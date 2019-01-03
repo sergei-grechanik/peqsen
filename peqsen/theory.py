@@ -8,12 +8,19 @@ from peqsen import Node, Hyperedge, Hypergraph, term, gen_list, parse, make_equa
 import inspect
 import attr
 
-FiniteFunction = attr.make_class('FiniteFunction',
-                                 ['name', 'arity', 'carrier_size', 'table', 'func'],
-                                 frozen=True)
-EvaluableSignature = attr.make_class('EvaluableSignature',
-                                     ['signature', 'evaluate', 'generate'],
-                                     frozen=True)
+@attr.s(slots=True, frozen=True)
+class FiniteFunction:
+    name = attr.ib()
+    arity = attr.ib()
+    carrier_size = attr.ib()
+    table = attr.ib()
+    func = attr.ib()
+
+@attr.s(slots=True, frozen=True)
+class EvaluableSignature:
+    signature = attr.ib()
+    evaluate = attr.ib()
+    generate = attr.ib()
 
 @strategies.composite
 def gen_finite_function(draw, num_elements=(1, 5), arity=(0, 3), name_len=5):
@@ -57,7 +64,10 @@ def gen_finite_evaluable_signature(draw, num_elements=(1, 5),
 
     return EvaluableSignature(signature=signature, evaluate=evaluate, generate=_generate)
 
-Theory = attr.make_class('Theory', ['signature', 'equalities'], frozen=True)
+@attr.s(slots=True, frozen=True)
+class Theory:
+    signature = attr.ib()
+    equalities = attr.ib()
 
 def make_evaluable_sig(labels2funs, generate):
     signature = {}

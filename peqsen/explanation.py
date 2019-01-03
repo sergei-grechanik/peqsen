@@ -5,8 +5,14 @@ import attr
 
 from peqsen import Listener, Node, Hyperedge, Hypergraph, Term, TriggerManager, parse, still_match
 
+IncidentNode = attr.make_class('IncidentNode', ['hyperedge', 'rhs'], frozen=True)
+IncidentNode.__doc__ = """A reason for merging, contains two hyperedges."""
+
+
 class Point:
-    pass
+    def __init__(self):
+        self.merged = None
+        self.merged_reason = None
 
 class ExplanationTracker(Listener):
     def __init__(self, hypergraph):
@@ -31,8 +37,8 @@ class ExplanationTracker(Listener):
 
         p1.merged = p
         p2.merged = p
-        p1.reason = reason
-        p2.reason = reason
+        p1.merge_reason = reason
+        p2.merge_reason = reason
 
         self.node_points[node.merged] = p
         del self.node_points[node]
