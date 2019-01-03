@@ -1,5 +1,5 @@
 import peqsen as PE
-from peqsen import Hypergraph, Node, Hyperedge, Term, Recursively, SmallestHyperedgeTracker
+from peqsen import *
 import hypothesis
 from hypothesis import given, strategies, reproduce_failure, seed
 
@@ -15,12 +15,12 @@ def test_basic_operations():
     hg_first = hg
 
     hg = Hypergraph()
-    [na] = hg.rewrite(add=Term('a'))
-    [nb1, nb2] = hg.rewrite(add=[Term('b', [na]),
-                                 Term('b', [na, na])])
+    na, *_ = hg.rewrite(add=term('a', ()))
+    nb1, nb2, *_ = hg.rewrite(add=[term('b', [na]),
+                                   term('b', [na, na])])
     hb1 = list(nb1.outgoing)[0]
-    [nc1, nc2] = hg.rewrite(add=[Term(('c', nb1)),
-                                 Term(('c', nb2))])
+    nc1, nc2, *_ = hg.rewrite(add=[term(('c', nb1)),
+                                   term(('c', nb2))])
     hg.rewrite(merge=[(nb1, nb2)])
     assert not hg_first.isomorphic(hg)
     hg.rewrite(remove=[hb1])
@@ -28,7 +28,7 @@ def test_basic_operations():
     assert hg_first.isomorphic(hg)
 
     hg3 = Hypergraph()
-    hg3.rewrite(add=[Recursively(nc1)])
+    hg3.rewrite(add=list_descendants(nc1.follow()))
 
     assert hg_first.isomorphic(hg3)
 
@@ -113,7 +113,8 @@ def test_add_ones_own(data):
                                            max_size=len(nodes)))
     recursive = data.draw(strategies.lists(strategies.booleans(),
                                            min_size=len(add_nodes), max_size=len(add_nodes)))
-    add_nodes = [Recursively(n) if r else n for n, r in zip(add_nodes, recursive)]
+    add_nodes = [e for n, r in zip(add_nodes, recursive)
+                 for e in (list_descendants(n) if r else [n])]
 
     hyperedges = list(h1.hyperedges())
     add_hyperedges = data.draw(strategies.lists(strategies.sampled_from(hyperedges),
@@ -287,7 +288,7 @@ def test_listener(data):
 
                 self.to_add |= set(elements)
 
-            def on_merge(self, hypergraph, node, removed, added):
+            def on_merge(self, hypergraph, node, removed, added, reason):
                 hypergraph.check_integrity(False)
                 assert node not in hypergraph
                 assert node.merged in hypergraph
@@ -323,6 +324,7 @@ def test_listener(data):
         h2.rewrite(add=lis.to_add)
         assert h1.isomorphic(h2)
 
+@reproduce_failure('3.73.3', b'AXicY2JkwATMIEFGMGKAyENYjIxMQIIJLsrAAAACsgAW')
 @given(strategies.data())
 def test_smallest_hyperedge_tracker(data):
     for congruence in [True, False]:
@@ -359,6 +361,11 @@ def test_smallest_hyperedge_tracker(data):
                 if terms:
                     (min_val1, _, min_term1) = min(terms, key=lambda x: x[0])
                     (_, min_val2, min_term2) = min(terms, key=lambda x: x[1])
+                    print()
+                    print(n)
+                    print(h1)
+                    print(min_val1, min_term1)
+                    print(set(tracker1.smallest_terms(n)))
                     assert min_val1 == tracker1.smallest[n][0]
                     assert min_val2 == tracker2.smallest[n][0]
 
@@ -446,6 +453,7 @@ if __name__ == "__main__":
     test_rewrite_noremove_order()
     test_rewrite_remove_order()
     test_listener()
-    test_smallest_hyperedge_tracker()
+    # TODO: the smallest hyperedge tracker is buggy and unmaintainable
+    #  test_smallest_hyperedge_tracker()
     test_pattern_is_acyclic()
     test_stat()

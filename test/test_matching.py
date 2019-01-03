@@ -36,7 +36,7 @@ def test_pattern_self_match(data):
     p, hp = data.draw(gen_pattern())
     # Note that h may differ from the pattern graph, not only because of redundant nodes in hp,
     # but also because of congruence closure
-    h.rewrite(add=Recursively(p))
+    h.rewrite(add=list_descendants(p))
     matches = list(find_matches(h, p))
     assert len(matches) > 0
 

@@ -64,9 +64,12 @@ class Node(GloballyIndexed):
         res = mapping.get(self)
         return self.follow() if res is None else res.follow()
 
+    def with_reason(self, reason):
+        return self
+
 
 class Hyperedge(GloballyIndexed):
-    def __init__(self, label, src=None, dst=None):
+    def __init__(self, label, src=None, dst=None, reason=None):
         super().__init__()
 
         if dst is None:
@@ -77,6 +80,7 @@ class Hyperedge(GloballyIndexed):
         self.label = label
         self.to_be_removed = False
         self.merged = None
+        self.reason = None
 
     def __repr__(self):
         label = self.label if isinstance(self.label, str) else repr(self.label)
@@ -94,7 +98,8 @@ class Hyperedge(GloballyIndexed):
                     return self
                 else:
                     return Hyperedge(self.label, None if self.src is None else self.src.follow(),
-                                     [d.follow() for d in self.dst])
+                                     [d.follow() for d in self.dst],
+                                     reason=self.reason)
             else:
                 return self
         else:
@@ -104,93 +109,67 @@ class Hyperedge(GloballyIndexed):
         res = mapping.get(self)
         if res is None:
             return Hyperedge(self.label, None if self.src is None else self.src.apply_map(mapping),
-                             [d.apply_map(mapping) for d in self.dst])
+                             [d.apply_map(mapping) for d in self.dst],
+                             reason=self.reason)
         else:
             return res.follow()
 
+    def with_reason(self, reason):
+        return Hyperedge(self.label, self.src, self.dst, reason=reason)
 
-class Recursively:
-    def __init__(self, node):
-        self.node = node
 
-    def follow(self):
-        return Recursively(self.node.follow())
+Term = attr.make_class('Term', ['label', 'dst'], frozen=True)
+Term.__doc__ = """A Term. `dst` must be a tuple of other terms or nodes"""
 
-class Term(Node):
-    """A Term may behave like a Node but it has a coarser equality (structural) and cannot be
-    a node of a hypergraph. It may be considered a node of some static hypergraph.
+def term_repr(self):
+    args = "(" + str(self.dst[0]) + ")" if len(self.dst) == 1 else str(tuple(self.dst))
+    if isinstance(self.label, str):
+        return self.label + args
+    else:
+        return repr(self.label) + args
 
-    A Term may contain ordinary Nodes as leafs. Following a term or applying a map to a term means
-    following and mapping these nodes.
-    """
-    def __init__(self, label, dst=None):
-        if dst is None and isinstance(label, tuple):
-            dst = [s if isinstance(s, (Node, Term)) else Term(s) for s in label[1:]]
-            label = label[0]
+Term.__repr__ = term_repr
 
-        if dst is None:
-            dst = []
+def term_apply_map(term, mapping):
+    if isinstance(term, Term):
+        return Term(term.label, tuple(term_apply_map(d, mapping) for d in term.dst))
+    else:
+        return term.apply_map(mapping)
 
-        self.hyperedge = Hyperedge(label, self, dst)
-        self._hash = hash((self.label, tuple(self.dst)))
+Term.apply_map = term_apply_map
 
-    @property
-    def outgoing(self):
-        return [self.hyperedge]
-
-    @property
-    def incoming(self):
-        raise RuntimeError("Getting incoming hyperedges of a Term is forbidden.")
-
-    @property
-    def label(self):
-        return self.hyperedge.label
-
-    @property
-    def dst(self):
-        return self.hyperedge.dst
-
-    @property
-    def merged():
-        return None
-
-    @property
-    def to_be_removed():
-        return False
-
-    def follow(self):
-        return Term(self.label, [d.follow() for d in self.dst])
-
-    def apply_map(self, mapping):
-        if self in mapping:
-            return mapping[self]
-            # I still think this might be dangerous but I don't know what to do about it
-            #  raise ValueError("Mapping terms themselves is forbidden. "
-            #                   "The term {} is in mapping {}".format(self, mapping))
-        return Term(self.label, [d.apply_map(mapping) for d in self.dst])
-
-    def __repr__(self):
-        args = "(" + str(self.dst[0]) + ")" if len(self.dst) == 1 else str(tuple(self.dst))
-        if isinstance(self.hyperedge.label, str):
-            return self.hyperedge.label + args
+def term(sexpr, dst=None):
+    if dst is None:
+        if isinstance(sexpr, Term) or isinstance(sexpr, Node):
+            return sexpr
         else:
-            return repr(self.hyperedge.label) + args
+            return Term(sexpr[0], tuple(term(t) for t in sexpr[1:]))
+    else:
+        return Term(sexpr, tuple(term(t) for t in dst))
 
-    def __eq__(self, other):
-        if not isinstance(other, Term):
-            return False
-        return self is other or (self.label == other.label and self.dst == other.dst)
+def list_term_elements(term):
+    if isinstance(term, Term):
+        n = Node()
+        more_elements = []
+        dst = []
+        for d in term.dst:
+            subelements = list_term_elements(d)
+            more_elements.extend(subelements)
+            dst.append(subelements[0])
+        h = Hyperedge(term.label, n, dst)
+        n.outgoing = [h]
+        return [n, h] + more_elements
+    elif isinstance(term, Node):
+        return [term]
 
-    def __hash__(self):
-        return self._hash
-
-    def __lt__(self, other):
-        if isinstance(other, Term):
-            return self.label < other.label or tuple(self.dst) < tuple(other.dst)
-        elif isinstance(other, Node):
-            return False
-        else:
-            return NotImplemented
+def list_descendants(node, history=set()):
+    if isinstance(node, Node):
+        if node in history:
+            return []
+        new_history = history | {node}
+        return [node] + [e for h in node.outgoing for e in list_descendants(h, new_history)]
+    elif isinstance(node, Hyperedge):
+        return [node] + [e for d in node.dst for e in list_descendants(d, history)]
 
 
 Equality = attr.make_class('Equality', ['name', 'lhs', 'rhs', 'vars2nodes'], frozen=True)
@@ -209,10 +188,18 @@ def make_equality(func, name=None):
     return Equality(name=name, lhs=pair[0], rhs=pair[1], vars2nodes=vars2nodes)
 
 
+ByCongruence = attr.make_class('ByCongruence', ['lhs', 'rhs'], frozen=True)
+ByCongruence.__doc__ = """A reason for merging, contains two hyperedges."""
+
+ByRule = attr.make_class('ByRule', ['rule', 'match', 'index'], frozen=True)
+ByRule.__doc__ = """A reason for adding a hyperedge by rule application, contains a rule, a match
+and an index in the `add` part of the rewriting."""
+
+
 class Listener:
     def on_add(self, hypergraph, elements):
         pass
-    def on_merge(self, hypergraph, node, removed, added):
+    def on_merge(self, hypergraph, node, removed, added, reason):
         pass
     def on_remove(self, hypergraph, elements):
         pass
@@ -265,9 +252,9 @@ class Hypergraph:
         for l in self.listeners:
             l.on_add(self, elements)
 
-    def on_merge(self, node, removed, added):
+    def on_merge(self, node, removed, added, reason):
         for l in self.listeners:
-            l.on_merge(self, node, removed, added)
+            l.on_merge(self, node, removed, added, reason)
 
     def on_remove(self, elements):
         for l in self.listeners:
@@ -290,19 +277,34 @@ class Hypergraph:
         if isinstance(remove, (Hyperedge, Node)):
             remove = [remove]
 
-        if isinstance(add, (Node, Hyperedge, Term, Recursively)):
+        if isinstance(add, (Node, Hyperedge, Term)):
             add = [add]
+
+        # Transform Terms into nodes and hyperedges
+        add_copy = add
+        add = []
+        post_add = []
+        for e in add_copy:
+            if isinstance(e, Term):
+                term_elements = list_term_elements(e)
+                add.append(term_elements[0])
+                post_add.extend(term_elements[1:])
+            else:
+                add.append(e)
+        add.extend(post_add)
 
         remove = [e.follow() for e in remove]
         add = [e.follow() for e in add]
-        merge = [[e.follow() for e in es] for es in merge]
+        # Convert pairs to triples, the third element is an optional reason
+        merge = [(es[0].follow(), es[1].follow(), (None if len(es) <= 2 else es[2]))
+                 for es in merge]
 
         self._being_modified = True
 
         self._remove(remove, 0, ignore_already_removed=ignore_already_removed)
 
         added = []
-        to_merge = list(merge)
+        to_merge = merge
         resmap = {}
         add_res = self._add(add, added, to_merge, resmap)
         self.on_add(added)
@@ -380,7 +382,7 @@ class Hypergraph:
         if not merge:
             return
         to_merge = []
-        for n1, n2 in merge:
+        for n1, n2, reason in merge:
             n1 = n1.follow()
             n2 = n2.follow()
             if n1 != n2:
@@ -405,62 +407,31 @@ class Hypergraph:
                                 self._hyperedges.get((h.label, tuple(h.dst))).remove(h)
 
                         if h.merged is None:
-                            new_h = Hyperedge(h.label, new_src, new_dst)
+                            new_h = Hyperedge(h.label, new_src, new_dst,
+                                              reason=h.reason)
                             new_h.to_be_removed = h.to_be_removed
                             h.merged = self._add_hyperedge(new_h, added, to_merge)
                         h.to_be_removed = True
                         self._remove_hyperedge(h, 1, removed)
                 self._nodes.remove(n1)
-                self.on_merge(n1, removed, added)
+                self.on_merge(n1, removed, added, reason)
         self._merge(to_merge)
 
     def _add(self, elements, added, to_merge, resmap):
-        """Add `elements` which may be nodes, hyperedges, terms and elements to add recursively
+        """Add `elements` which may be nodes or hyperedges
         The result is a list of corresponding added (or already existing) elements
         - `added` is augmented with newly added stuff (which didn't exist in the graph before)
         - `to_merge` is augmented with pairs of nodes to merge as a result of this addition
-        - `resmap` is augmented with mapping from the given elements (or their descendants in
-          the case of Recursive) to the corresponding graph elements."""
+        - `resmap` is augmented with mapping from the given elements to the corresponding graph
+          elements."""
         res = []
         for e in elements:
-            recursively = False
-            if isinstance(e, Term):
-                # Terms are always added recursively
-                e = Recursively(e)
-            if isinstance(e, Recursively):
-                recursively = True
-                e = e.node
-
             if isinstance(e, Node):
                 if e in self._nodes:
-                    # If it is already in the graph, nothing to do, even if `recursively`,
-                    # because in this case all its descendants are in the graph too
+                    # If it is already in the graph, nothing to do
                     res.append(e)
                 elif e in resmap:
                     n = resmap[e]
-                    if n is None:
-                        # This case means that we are adding the node recursively and we reached
-                        # the same node along some cyclic path, but we haven't
-                        # added any corresponding node yet, so just add a node
-                        n = Node()
-                        self._nodes.add(n)
-                        added.append(n)
-                        resmap[e] = n
-                    res.append(resmap[e])
-                elif recursively and len(e.outgoing) > 0:
-                    # Note that if there are no outgoing hyperedges then there's nothing to do
-                    # recursively
-                    resmap[e] = None
-                    for h in e.outgoing:
-                        if h.src is not None and h.src != e:
-                            raise ValueError("The source of a hyperedge being added is not the same"
-                                             "as its parent node")
-                        new_dst = self._add([Recursively(d) for d in h.dst],
-                                            added, to_merge, resmap)
-                        h_res = self._add_hyperedge(Hyperedge(h.label, resmap[e], new_dst),
-                                                    added, to_merge)
-                        resmap[e] = h_res.src
-                        resmap[h] = h_res
                     res.append(resmap[e])
                 else:
                     n = Node()
@@ -469,20 +440,19 @@ class Hypergraph:
                     added.append(n)
                     res.append(n)
             elif isinstance(e, Hyperedge):
-                if recursively:
-                    new_dst = self._add([Recursively(d) for d in e.dst],
-                                        added, to_merge, resmap)
-                else:
-                    new_dst = self._add(e.dst, added, to_merge, resmap)
+                new_dst = self._add(e.dst, added, to_merge, resmap)
 
                 if e.src is None or e.src in self._nodes:
-                    h = self._add_hyperedge(Hyperedge(e.label, e.src, new_dst),
+                    h = self._add_hyperedge(Hyperedge(e.label, e.src, new_dst,
+                                                      reason=e.reason),
                                             added, to_merge)
                 elif e.src in resmap:
-                    h = self._add_hyperedge(Hyperedge(e.label, resmap[e.src], new_dst),
+                    h = self._add_hyperedge(Hyperedge(e.label, resmap[e.src], new_dst,
+                                                      reason=e.reason),
                                             added, to_merge)
                 else:
-                    h = self._add_hyperedge(Hyperedge(e.label, None, new_dst),
+                    h = self._add_hyperedge(Hyperedge(e.label, None, new_dst,
+                                                      reason=e.reason),
                                             added, to_merge)
                     resmap[e.src] = h.src
 
@@ -503,7 +473,8 @@ class Hypergraph:
                     return existing
                 else:
                     # in this case we have to merge the sources, and continue adding the hyperedge
-                    to_merge.append((hyperedge.src, existing.src))
+                    to_merge.append((hyperedge.src, existing.src,
+                                     ByCongruence(hyperedge, existing)))
 
             # Sometimes there may be an existing hyperedge which wasn't registered in _hyperedges
             if hyperedge.src is not None:
@@ -774,14 +745,14 @@ def gen_term(draw, signature=DEFAULT_SIGNATURE, max_leaves=20, max_variables=5,
     if variables is None:
         vars_number = draw(strategies.integers(0, max_variables))
         variables = [Node() for _ in range(vars_number)]
-    leaves = [Term(l) for l in leaf_labels(signature)] + variables
+    leaves = [term(l, ()) for l in leaf_labels(signature)] + variables
 
     @strategies.composite
     #@peqsen.util.traced
     def _extend_term(draw, subgen, sig=nonleaf_subsignature(signature)):
         label = draw(strategies.sampled_from(sorted(sig.keys())))
         child_len = draw(gen_number(sig[label]))
-        return Term(label, draw(strategies.lists(subgen, min_size=child_len, max_size=child_len)))
+        return term(label, draw(strategies.lists(subgen, min_size=child_len, max_size=child_len)))
 
     gen = strategies.recursive(strategies.sampled_from(leaves), _extend_term)
     return draw(strategies.tuples(gen, gen)) if equality else draw(gen)

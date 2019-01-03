@@ -1,7 +1,10 @@
 
 import itertools
 from peqsen import Listener, Node, Hyperedge, Hypergraph, Term
+import peqsen
 
+# TODO: This contains mistakes and should be rewritten
+@peqsen.util.for_all_methods(peqsen.util.traced)
 class SmallestHyperedgeTracker(Listener):
     def __init__(self, worst_value=float("inf"), measure=None):
         self.smallest = {}
@@ -11,11 +14,11 @@ class SmallestHyperedgeTracker(Listener):
         self.measure = measure
 
     @staticmethod
-    def size(hyperedge, subvalues):
+    def size(label, subvalues):
         return sum(subvalues) + 1
 
     @staticmethod
-    def depth(hyperedge, subvalues):
+    def depth(label, subvalues):
         return max([0] + subvalues) + 1
 
     def _update_node(self, node, to_update):
@@ -23,8 +26,8 @@ class SmallestHyperedgeTracker(Listener):
             self._update_hyperedge(h, to_update)
 
     def _update_hyperedge(self, hyperedge, to_update):
-        value = self.measure(hyperedge, [self.smallest.get(d, [self.worst_value])[0]
-                                         for d in hyperedge.dst])
+        value = self.measure(hyperedge.label, [self.smallest.get(d, [self.worst_value])[0]
+                                               for d in hyperedge.dst])
         src_smallest = self.smallest.setdefault(hyperedge.src, (self.worst_value, set()))
         if value < src_smallest[0]:
             self.smallest[hyperedge.src] = (value, {hyperedge})
@@ -56,10 +59,9 @@ class SmallestHyperedgeTracker(Listener):
             if isinstance(e, Node) and not e in self.smallest:
                 self.smallest[e] = (self.worst_value, set())
         self._update(h for h in elements if isinstance(h, Hyperedge))
+        peqsen.util.printind("smallest now =", self.smallest)
 
-
-
-    def on_merge(self, hypergraph, node, removed, added):
+    def on_merge(self, hypergraph, node, removed, added, reason):
         # If some of the merged (removed) hyperedges were among the smallest,
         # we should update them in the corresponding sets (except for the outgoings of `node')
         for h in removed:
@@ -81,6 +83,7 @@ class SmallestHyperedgeTracker(Listener):
         del self.smallest[node]
 
         self._update(added)
+        peqsen.util.printind("smallest now =", self.smallest)
 
     def _make_worst_rec(self, element):
         if isinstance(element, Hyperedge):
@@ -103,13 +106,14 @@ class SmallestHyperedgeTracker(Listener):
         to_update = []
         for e in elements:
             if self._make_worst_rec(e):
-                to_update.extend(list(e.src.outgoing))
+                to_update.extend(list(e.src.outgoing) + [e.src])
         self._update(to_update)
-
+        peqsen.util.printind("smallest now =", self.smallest)
 
     def on_remove_node(self, hypergraph, node, hyperedges):
         del self.smallest[node]
         self.on_remove(hypergraph, hyperedges)
+        peqsen.util.printind("smallest now =", self.smallest)
 
     def smallest_terms(self, node):
         for h in self.smallest[node][1]:
@@ -117,8 +121,8 @@ class SmallestHyperedgeTracker(Listener):
                 yield Term(h.label, subterms)
 
 
-def measure_term(term, function):
-    return function(term.hyperedge, [measure_term(d, function) for d in term.dst])
+def measure_term(term, measure):
+    return measure(term.label, [measure_term(d, measure) for d in term.dst])
 
 def finite_terms(node, max_depth=float('inf')):
     def _finite_terms(node, history, max_depth=max_depth):

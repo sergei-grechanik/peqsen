@@ -97,9 +97,8 @@ class SimpleEvaluator(Listener):
         for e in elements:
             _eval(e)
 
-    def on_merge(self, hypergraph, node, removed, added):
-        pass
-        #self.on_add(added)
+    def on_merge(self, hypergraph, node, removed, added, reason):
+        self.on_add(hypergraph, added)
 
     def on_remove(self, hypergraph, elements):
         pass

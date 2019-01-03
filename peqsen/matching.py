@@ -7,7 +7,7 @@ import peqsen.util
 # TODO: Remove all printinds
 #from peqsen.util import printind
 printind = lambda *_: None
-from peqsen import Listener, Node, Hyperedge, Hypergraph, Term
+from peqsen import Listener, Node, Hyperedge, Hypergraph, Term, list_term_elements
 
 Multerm = attr.make_class('Multerm', ['terms'], frozen=True)
 Multerm.__doc__ = """Used internally in TriggerManager. Multerm is a list of terms that can be
@@ -43,6 +43,9 @@ class TriggerManager(Listener):
         self._node_callbacks = []
 
     def add_trigger(self, pattern, callback):
+        if isinstance(pattern, Term):
+            pattern = list_term_elements(pattern)[0]
+
         assert isinstance(pattern, Node)
 
         if len(pattern.outgoing) == 0:
@@ -113,7 +116,7 @@ class TriggerManager(Listener):
                 mterm, mlst = self._pattern_to_multerm(d)
                 matchlist.extend(mlst)
                 subterms.append(mterm)
-            return Term(pattern.label, subterms), matchlist
+            return Term(pattern.label, tuple(subterms)), matchlist
 
     def _matches_to_matchlists(self, matches):
         if isinstance(matches, NodeMatches):
@@ -280,7 +283,7 @@ class TriggerManager(Listener):
                 for c in self._node_callbacks:
                     c(e)
 
-    def on_merge(self, hypergraph, node, removed, added):
+    def on_merge(self, hypergraph, node, removed, added, reason):
         printind("On merge", node)
         printind("merge cb: ", self._merge_callbacks)
 

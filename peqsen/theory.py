@@ -3,7 +3,7 @@ import hypothesis
 from hypothesis import strategies
 
 import peqsen.util
-from peqsen import Node, Hyperedge, Hypergraph, Term, gen_list, parse, make_equality
+from peqsen import Node, Hyperedge, Hypergraph, term, gen_list, parse, make_equality
 
 import inspect
 import attr
@@ -82,34 +82,34 @@ def make_theory(sig, equalities):
 
 def assoc(label, identity=None):
     res = []
-    res.append(make_equality(lambda x, y, z: (Term(label, [Term(label, [x, y]), z]),
-                                              Term(label, [x, Term(label, [y, z])]))))
+    res.append(make_equality(lambda x, y, z: (term(label, [term(label, [x, y]), z]),
+                                              term(label, [x, term(label, [y, z])]))))
     if identity is not None:
-        res.append(make_equality(lambda x: (Term(label, [Term(identity), x]), x)))
+        res.append(make_equality(lambda x: (term(label, [term(identity, ()), x]), x)))
     return res
 
 def comm(label, identity=None):
     res = []
-    res.append(make_equality(lambda x, y: (Term(label, [x, y]),
-                                           Term(label, [y, x]))))
+    res.append(make_equality(lambda x, y: (term(label, [x, y]),
+                                           term(label, [y, x]))))
     if identity is not None:
-        res.append(make_equality(lambda x: (Term(label, [Term(identity), x]), x)))
+        res.append(make_equality(lambda x: (term(label, [term(identity), x]), x)))
     return res
 
 def comm_assoc(label, identity=None):
     res = []
-    res.append(make_equality(lambda x, y, z: (Term(label, [Term(label, [x, y]), z]),
-                                              Term(label, [x, Term(label, [y, z])]))))
-    res.append(make_equality(lambda x, y: (Term(label, [x, y]), Term(label, [y, x]))))
+    res.append(make_equality(lambda x, y, z: (term(label, [term(label, [x, y]), z]),
+                                              term(label, [x, term(label, [y, z])]))))
+    res.append(make_equality(lambda x, y: (term(label, [x, y]), term(label, [y, x]))))
     if identity is not None:
-        res.append(make_equality(lambda x: (Term(label, [Term(identity), x]), x)))
+        res.append(make_equality(lambda x: (term(label, [term(identity, ()), x]), x)))
     return res
 
 def distrib_left(mul_label, add_label):
     x, y, z = [Node() for i in range(3)]
-    return [make_equality(lambda x, y, z: (Term(mul_label, [x, Term(add_label, [y, z])]),
-                                           Term(add_label, [Term(mul_label, [x, y]),
-                                                            Term(mul_label, [x, z])])))]
+    return [make_equality(lambda x, y, z: (term(mul_label, [x, term(add_label, [y, z])]),
+                                           term(add_label, [term(mul_label, [x, y]),
+                                                            term(mul_label, [x, z])])))]
 
 BooleanSig = \
     make_evaluable_sig(

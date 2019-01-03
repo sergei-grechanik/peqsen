@@ -3,7 +3,8 @@ import itertools
 import collections
 import attr
 
-from peqsen import Listener, Node, Hyperedge, Hypergraph, Term, TriggerManager, parse, still_match
+from peqsen import Listener, Node, Hyperedge, Hypergraph, Term, TriggerManager, parse, \
+    still_match, ByRule, list_term_elements
 
 Rule = attr.make_class('Rule', ['name', 'trigger', 'rewrite'], frozen=True)
 
@@ -22,13 +23,28 @@ def equality_to_rule(equality, reverse=False, destructive=False, name=None):
     if name is None:
         name = ("(rev)" if reverse else "") + ("(des)" if destructive else "") + equality.name
 
-    def _rewrite(match, lhs=lhs, rhs=rhs, destructive=destructive):
-        if destructive:
-            return {'remove': [match[lhs.hyperedge]], 'add': [rhs.apply_map(match)]}
-        else:
-            return {'add': [rhs.apply_map(match)]}
+    if isinstance(lhs, Term):
+        node, lhs_hyperedge, *_ = list_term_elements(lhs)
+        lhs = node
+    else:
+        lhs_hyperedge = None
+        assert not destructive, "Not supported"
 
-    return Rule(name=name, trigger=lhs, rewrite=_rewrite)
+    rule_container = []
+
+    def _rewrite(match, lhs_hyperedge=lhs_hyperedge, rhs=rhs,
+                 destructive=destructive, rule_container=rule_container):
+        to_add = list_term_elements(rhs.apply_map(match))
+        to_add = [e.with_reason(ByRule(rule_container[0], match, i))
+                  for i, e in enumerate(to_add)]
+        if destructive:
+            return {'remove': [match[lhs_hyperedge]], 'add': to_add}
+        else:
+            return {'add': to_add}
+
+    rule_container.append(Rule(name=name, trigger=lhs, rewrite=_rewrite))
+
+    return rule_container[0]
 
 class Rewriter(Listener):
     def __init__(self, hypergraph, trigger_manager=None, score=None):
