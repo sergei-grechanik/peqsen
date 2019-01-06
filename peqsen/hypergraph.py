@@ -88,6 +88,12 @@ class Hyperedge(GloballyIndexed):
             label + repr(tuple(self.dst)) + \
             ("(->" + repr(self.merged) + ")" if self.merged else "")
 
+    def incident(self, index):
+        if index == -1:
+            return self.src
+        else:
+            return self.dst[index]
+
     def follow(self, allow_copy=True):
         """Note that sometimes this function returns a completely new hyperedge. This is ok when we
         are adding it into a hypergraph, but there might be some corner cases, I'm not sure."""
@@ -117,13 +123,13 @@ class Hyperedge(GloballyIndexed):
     def with_reason(self, reason):
         return Hyperedge(self.label, self.src, self.dst, reason=reason)
 
-@attr.s(slots=True, frozen=True)
+@attr.s(slots=True, frozen=True, repr=False, cache_hash=True)
 class Term:
     """A Term. `dst` must be a tuple of other terms or nodes"""
     label = attr.ib()
     dst = attr.ib(default=(), converter=tuple)
 
-    def term_repr(self):
+    def __repr__(self):
         args = "(" + str(self.dst[0]) + ")" if len(self.dst) == 1 else str(tuple(self.dst))
         if isinstance(self.label, str):
             return self.label + args
@@ -135,8 +141,6 @@ class Term:
             return Term(self.label, (d.apply_map(mapping) for d in self.dst))
         else:
             return self.apply_map(mapping)
-
-Term.__repr__ = Term.term_repr
 
 def term(sexpr, dst=None):
     if dst is None:
@@ -150,16 +154,24 @@ def term(sexpr, dst=None):
         return Term(sexpr, tuple(term(t) for t in dst))
 
 def list_term_elements(term):
+    """Convert a term into a list of hyperedges and nodes."""
     if isinstance(term, Term):
         n = Node()
+        n._is_term_node = True
+
         more_elements = []
         dst = []
         for d in term.dst:
             subelements = list_term_elements(d)
             more_elements.extend(subelements)
             dst.append(subelements[0])
+
         h = Hyperedge(term.label, n, dst)
         n.outgoing = [h]
+        for d in h.dst:
+            if hasattr(d, '_is_term_node') and d._is_term_node:
+                d.incoming.add(h)
+
         return [n, h] + more_elements
     elif isinstance(term, Node):
         return [term]
@@ -199,12 +211,14 @@ class ByCongruence:
     lhs = attr.ib()
     rhs = attr.ib()
 
-@attr.s(slots=True, frozen=True)
+@attr.s(slots=True, frozen=True, cmp=False)
 class ByRule:
-    """A reason for adding a hyperedge by rule application, contains a rule, a match and an index in
-    the `add` part of the rewriting."""
     rule = attr.ib()
     match = attr.ib()
+
+@attr.s(slots=True, frozen=True)
+class IthHyperedgeReason:
+    reason = attr.ib()
     index = attr.ib()
 
 

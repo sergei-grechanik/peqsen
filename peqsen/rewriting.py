@@ -4,13 +4,19 @@ import collections
 import attr
 
 from peqsen import Listener, Node, Hyperedge, Hypergraph, Term, TriggerManager, parse, \
-    still_match, ByRule, list_term_elements
+    still_match, ByRule, IthHyperedgeReason, list_term_elements
 
-@attr.s(slots=True, frozen=True)
+@attr.s(slots=True, frozen=True, cmp=False)
 class Rule:
     name = attr.ib()
     trigger = attr.ib()
     rewrite = attr.ib()
+
+@attr.s(slots=True, frozen=True, cmp=False)
+class CongruenceRule:
+    name = attr.ib(default="congruence")
+    trigger = attr.ib(default=None)
+    rewrite = attr.ib(default=lambda _: {})
 
 def equality_to_rule(equality, reverse=False, destructive=False, name=None):
     equality = parse(equality)
@@ -38,8 +44,9 @@ def equality_to_rule(equality, reverse=False, destructive=False, name=None):
 
     def _rewrite(match, lhs_hyperedge=lhs_hyperedge, rhs=rhs,
                  destructive=destructive, rule_container=rule_container):
+        reason = ByRule(rule_container[0], match)
         to_add = list_term_elements(rhs.apply_map(match))
-        to_add = [e.with_reason(ByRule(rule_container[0], match, i))
+        to_add = [e.with_reason(IthHyperedgeReason(reason, i))
                   for i, e in enumerate(to_add)]
         if destructive:
             return {'remove': [match[lhs_hyperedge]], 'add': to_add}

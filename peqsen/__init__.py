@@ -6,4 +6,5 @@ from .matching import *
 from .evaluation import *
 from .theory import *
 from .rewriting import *
+from .explanation import *
 
