@@ -4,7 +4,7 @@ import collections
 import attr
 
 from peqsen import Listener, Node, Hyperedge, Hypergraph, Term, TriggerManager, parse, \
-    still_match, ByRule, IthHyperedgeReason, list_term_elements
+    still_match, ByRule, IthElementReason, list_term_elements
 
 @attr.s(slots=True, frozen=True, cmp=False)
 class Rule:
@@ -30,9 +30,6 @@ def equality_to_rule(equality, reverse=False, destructive=False, name=None):
     if reverse:
         lhs, rhs = rhs, lhs
 
-    if name is None:
-        name = ("(rev)" if reverse else "") + ("(des)" if destructive else "") + equality.name
-
     if isinstance(lhs, Term):
         node, lhs_hyperedge, *_ = list_term_elements(lhs)
         lhs = node
@@ -40,18 +37,26 @@ def equality_to_rule(equality, reverse=False, destructive=False, name=None):
         lhs_hyperedge = None
         assert not destructive, "Not supported"
 
+    if name is None:
+        name = ("(rev)" if reverse else "") + ("(des)" if destructive else "") + equality.name
+
     rule_container = []
 
-    def _rewrite(match, lhs_hyperedge=lhs_hyperedge, rhs=rhs,
+    def _rewrite(match, lhs_hyperedge=lhs_hyperedge, lhs=lhs, rhs=rhs,
                  destructive=destructive, rule_container=rule_container):
         reason = ByRule(rule_container[0], match)
-        to_add = list_term_elements(rhs.apply_map(match))
-        to_add = [e.with_reason(IthHyperedgeReason(reason, i))
-                  for i, e in enumerate(to_add)]
-        if destructive:
-            return {'remove': [match[lhs_hyperedge]], 'add': to_add}
+        if isinstance(rhs, Term):
+            to_add = list_term_elements(rhs.apply_map(match), top_node=match[lhs], reason=reason)
+            if destructive:
+                return {'remove': [match[lhs_hyperedge]], 'add': to_add}
+            else:
+                return {'add': to_add}
         else:
-            return {'add': to_add}
+            to_merge = [(match[lhs], rhs.apply_map(match), reason)]
+            if destructive:
+                return {'remove': [match[lhs_hyperedge]], 'merge': to_merge}
+            else:
+                return {'merge': to_merge}
 
     rule_container.append(Rule(name=name, trigger=lhs, rewrite=_rewrite))
 

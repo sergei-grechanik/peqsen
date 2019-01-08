@@ -4,7 +4,8 @@ import collections
 import attr
 
 from peqsen import Listener, Node, Hyperedge, Hypergraph, Term, TriggerManager, parse, \
-    still_match, match_follow, ByRule, ByCongruence, IthHyperedgeReason, Rule, CongruenceRule
+    still_match, match_follow, ByRule, ByCongruence, IthElementReason, Rule, CongruenceRule, \
+    AddTermReason, list_term_elements
 
 @attr.s(slots=True, frozen=True)
 class IncidentNode:
@@ -32,6 +33,15 @@ class IncidentNode:
 
         return res
 
+    @staticmethod
+    def all_for_node(node):
+        res = []
+        for h in node.outgoing:
+            res.append(IncidentNode(h, -1))
+        for h in node.incoming:
+            res.extend(IncidentNode.all_of(h, node))
+        return res
+
 # These are compared by reference
 @attr.s(frozen=True, cmp=False)
 class MatchScript:
@@ -46,13 +56,17 @@ class RuleApplicationScript:
     match_script = attr.ib()
 
 @attr.s(frozen=True)
-class IthHyperedgeScript:
+class IthElementScript:
     script = attr.ib()
     index = attr.ib()
 
 @attr.s(frozen=True)
 class RunAllScript:
     subscripts = attr.ib()
+
+@attr.s(frozen=True)
+class AddTermScript:
+    term = attr.ib()
 
 def run_script(hypergraph, script, cache=None):
     if cache is None:
@@ -61,7 +75,7 @@ def run_script(hypergraph, script, cache=None):
     if isinstance(script, RunAllScript):
         for s in script.subscripts:
             run_script(hypergraph, s, cache)
-    elif isinstance(script, IthHyperedgeScript):
+    elif isinstance(script, IthElementScript):
         return run_script(hypergraph, script.script, cache)[script.index]
     elif script in cache:
         return cache[script]
@@ -102,6 +116,12 @@ def run_script(hypergraph, script, cache=None):
 
         cache[script] = added
         return added
+    elif isinstance(script, AddTermScript):
+        added = hypergraph.rewrite(add=list_term_elements(script.term))
+        cache[script] = added
+        return added
+    else:
+        raise ValueError("Don't know how to runs script {}".format(script))
 
 def make_congruence_rule_and_match(lhs, rhs):
     if lhs.label != rhs.label or lhs.dst != rhs.dst:
@@ -120,13 +140,14 @@ def make_congruence_rule_and_match(lhs, rhs):
 
     return (rule, match)
 
+@attr.s(cmp=False)
 class Point:
-    def __init__(self):
-        self.merged = None
-        self.merged_reason = None
+    merged = attr.ib(default=None)
+    merge_reason = attr.ib(default=None)
 
 class ExplanationTracker(Listener):
     def __init__(self, hypergraph):
+        hypergraph.listeners.add(self)
         self.node_points = {}
         self.hyperedge_points = {}
 
@@ -136,10 +157,11 @@ class ExplanationTracker(Listener):
                 self.node_points[e] = Point()
         for e in elements:
             if isinstance(e, Hyperedge):
-                src_point = Point(IncidentNode(e.reason), merged=self.node_points[e.src])
-                dst_points = [Point(IncidentNode(e.reason, i), merged=self.node_points[d])
+                src_point = Point(merged=self.node_points[e.src], merge_reason=e.reason)
+                dst_points = [Point(merged=self.node_points[d], merge_reason=e.reason)
                               for i, d in enumerate(e.dst)]
                 self.hyperedge_points[e] = [(e.reason, src_point, dst_points)]
+                print("Added", e, e.reason)
 
     def on_merge(self, hypergraph, node, removed, added, reason):
         p1 = self.node_points[node]
@@ -156,6 +178,7 @@ class ExplanationTracker(Listener):
 
         for h in removed:
             self.hyperedge_points.setdefault(h.merged, []).extend(self.hyperedge_points.get(h, []))
+            print("Merged", h, h.merrged)
 
     def get_points(self, incident):
         return [srcp if incident.index == -1 else dstp[incident.index]
@@ -184,8 +207,8 @@ class ExplanationTracker(Listener):
         if pair in cache:
             return cache[pair]
 
-        points1 = get_points(incident1)
-        points2 = get_points(incident2)
+        points1 = self.get_points(incident1)
+        points2 = self.get_points(incident2)
 
         best_paths = min((self.join_points(p1, p2) for p1 in points1 for p2 in points2),
                          key=lambda triple: len(triple[1]) + len(triple[2]))
@@ -213,27 +236,23 @@ class ExplanationTracker(Listener):
             res = RuleApplicationScript(rule, self.script_for_match(match, cache))
             cache[reason] = res
             return res
-        else:
-            raise RuntimeError("Usupported reason: {}".format(reason))
-
-    def script_for_hyperedge(self, hyperedge, cache):
-        if hyperedge in cache:
-            return cache[hyperedge]
-
-        reason = self.hyperedge_points[hyperedge]
-
-        if isinstance(reason, IthHyperedgeReason):
-            index = reason.index
-            reason = reason.reason
-            res = IthHyperedgeScript(self.script_for_reason(reason, cache), index)
-            cache[hyperedge] = res
+        elif isinstance(reason, AddTermReason):
+            res = AddTermScript(reason.term)
+            cache[reason] = res
+            return res
+        elif isinstance(reason, IthElementReason):
+            res = IthElementScript(self.script_for_reason(reason.reason, cache), reason.index)
+            cache[reason] = res
             return res
         else:
-            raise RuntimeError("Hyperedge's reason must be IthHyperedgeReason, not {}"
-                               .format(reason))
+            raise RuntimeError("Unsupported reason: {}".format(reason))
+
+    def script_for_hyperedge(self, hyperedge, cache):
+        return self.script_for_reason(hyperedge.reason, cache)
 
     def script_for_match(self, match, cache):
         hyperedge_scripts = {}
+        node_scripts = {}
         merge_scripts = []
 
         for e, h in match.items():
@@ -242,11 +261,11 @@ class ExplanationTracker(Listener):
 
         for e, n in match.items():
             if isinstance(e, Node):
-                incicent_hyperedges = [h
+                incident_hyperedges = [h
                                        for h in itertools.chain(n.incoming, n.outgoing)
                                        if h in match]
                 incidents = [inc
-                             for h in incicent_hyperedges
+                             for h in incident_hyperedges
                              for inc in IncidentNode.all_of(h, e)]
                 incidents_h = [IncidentNode(match[inc.hyperedge], inc.index)
                                for inc in incidents]
@@ -254,6 +273,9 @@ class ExplanationTracker(Listener):
                 for inc, inc_h in zip(incidents[1:], incidents_h[1:]):
                     s = self.script_for_merge(incidents_h[0], inc_h, cache)
                     merge_scripts.append((incidents[0], inc, s))
+
+                if not incident_hyperedges:
+                    pass
 
         res = MatchScript(list(match.keys()), hyperedge_scripts, merge_scripts)
         return res

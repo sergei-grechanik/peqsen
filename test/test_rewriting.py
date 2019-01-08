@@ -39,27 +39,62 @@ def test_parse_eq(data):
     h2.rewrite(merge=[(na2, nb2)])
     assert h1.isomorphic(h2)
 
+def check_explanation(data, graph, explanator):
+    multinodes = [n for n in graph.nodes() if len(n.outgoing) > 1]
+
+    if multinodes:
+        print("Yes!!!!!!!!!!!!")
+        node = data.draw(strategies.sampled_from(multinodes))
+        h1, h2 = data.draw(strategies.sets(strategies.sampled_from(sorted(node.outgoing)),
+                                           min_size=2, max_size=2))
+        script = explanator.script([h1, h2, (IncidentNode(h1), IncidentNode(h2))])
+        print("script", script)
+
+        new_graph = Hypergraph()
+        hh1, hh2, *_ = run_script(new_graph, script)
+        assert hh1.label == h1.label and hh2.label == h2.label
+        assert hh1.src == hh2.src
+    else:
+        print("No multinode")
+        pass
+
 def check_theory(data, theory, evaluablesig=None):
     graph = Hypergraph()
     rewriter = Rewriter(graph)
     num_models = data.draw(strategies.integers(1, 20))
     evaluator = SimpleEvaluator(graph, evaluablesig, data=data, num_models=num_models)
+    explanator = ExplanationTracker(graph)
 
     for e in theory.equalities:
-        destr = data.draw(strategies.booleans())
+        destr = False #data.draw(strategies.booleans())
         if data.draw(strategies.booleans()):
             rewriter.add_rule(equality_to_rule(e, destructive=destr))
         if data.draw(strategies.booleans()):
-            rewriter.add_rule(equality_to_rule(e, reverse=True))
+            rewriter.add_rule(equality_to_rule(e, destructive=destr, reverse=True))
 
     vars_number = data.draw(strategies.integers(0, 4))
     variables = [Node() for _ in range(vars_number)]
     terms = data.draw(strategies.lists(gen_term(theory.signature, variables=variables), max_size=5))
     graph.rewrite(add=terms)
 
+    #  print("===============================================")
+    #  print()
+    #  print("Terms:")
+    #  for t in terms: print(t)
+    #  print()
+    #  print("Initial graph")
+    #  print(graph)
+
     for i in range(data.draw(strategies.integers(1, 20))):
         rewriter.perform_rewriting(max_n=10)
 
+    #  print()
+    #  print("Rewritten graph")
+    #  print(graph)
+
+    check_explanation(data, graph, explanator)
+
+@reproduce_failure('3.73.3', b'AXicY2AgFjACIZgGAABEAAQ=')
 @given(strategies.data())
 def test_boolean(data):
     check_theory(data, BooleanTheory, BooleanSig)
@@ -69,8 +104,8 @@ def test_boolean_ext(data):
     check_theory(data, BooleanExtTheory, BooleanExtSig)
 
 if __name__ == "__main__":
-    test_parse()
-    test_list_elements()
-    test_parse_eq()
+    #  test_parse()
+    #  test_list_elements()
+    #  test_parse_eq()
     test_boolean()
-    test_boolean_ext()
+    #  test_boolean_ext()

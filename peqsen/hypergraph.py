@@ -80,7 +80,7 @@ class Hyperedge(GloballyIndexed):
         self.label = label
         self.to_be_removed = False
         self.merged = None
-        self.reason = None
+        self.reason = reason
 
     def __repr__(self):
         label = self.label if isinstance(self.label, str) else repr(self.label)
@@ -153,27 +153,38 @@ def term(sexpr, dst=None):
     else:
         return Term(sexpr, tuple(term(t) for t in dst))
 
-def list_term_elements(term):
+def list_term_elements(term, top_node=None, reason=None, index=0):
     """Convert a term into a list of hyperedges and nodes."""
+    if reason is None:
+        reason = AddTermReason(term)
+
     if isinstance(term, Term):
-        n = Node()
-        n._is_term_node = True
+        if top_node is None:
+            n = Node()
+            n._is_term_node = True
+        else:
+            n = top_node
 
         more_elements = []
         dst = []
+        idx = index + 2
         for d in term.dst:
-            subelements = list_term_elements(d)
+            subelements = list_term_elements(d, reason=reason, index=idx)
             more_elements.extend(subelements)
             dst.append(subelements[0])
+            idx += len(subelements)
 
-        h = Hyperedge(term.label, n, dst)
-        n.outgoing = [h]
+        h = Hyperedge(term.label, n, dst, reason=IthElementReason(reason, index + 1))
+        if top_node is None:
+            n.outgoing = (h,)
         for d in h.dst:
             if hasattr(d, '_is_term_node') and d._is_term_node:
                 d.incoming.add(h)
 
         return [n, h] + more_elements
     elif isinstance(term, Node):
+        if top_node is not None:
+            raise ValueError("Cannot apply top_node to a trivial term")
         return [term]
 
 def list_descendants(node, history=set()):
@@ -217,7 +228,11 @@ class ByRule:
     match = attr.ib()
 
 @attr.s(slots=True, frozen=True)
-class IthHyperedgeReason:
+class AddTermReason:
+    term = attr.ib()
+
+@attr.s(slots=True, frozen=True)
+class IthElementReason:
     reason = attr.ib()
     index = attr.ib()
 
