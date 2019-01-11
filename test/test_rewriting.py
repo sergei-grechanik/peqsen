@@ -94,7 +94,7 @@ def check_theory(data, theory, evaluablesig=None):
 
     check_explanation(data, graph, explanator)
 
-@reproduce_failure('3.73.3', b'AXicY2AgFjACIZgGAABEAAQ=')
+@reproduce_failure('3.73.3', b'AXicY2DADRhReYyMDExgBgAAdAAI')
 @given(strategies.data())
 def test_boolean(data):
     check_theory(data, BooleanTheory, BooleanSig)
