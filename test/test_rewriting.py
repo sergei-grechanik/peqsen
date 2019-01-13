@@ -6,6 +6,8 @@ import hypothesis
 from hypothesis import given, strategies, reproduce_failure, seed
 
 import sys
+import pprint
+import attr
 
 @given(strategies.data())
 def test_parse(data):
@@ -51,11 +53,13 @@ def check_explanation(data, graph, explanator):
         print(h1)
         print(h2)
         print("script")
-        print(script)
+        print(dump_script(script))
         print()
 
         new_graph = Hypergraph()
         hh1, hh2, *_ = run_script(new_graph, script)
+        hh1 = hh1.follow()
+        hh2 = hh2.follow()
         print("New graph:")
         print(new_graph)
         print()
@@ -103,7 +107,6 @@ def check_theory(data, theory, evaluablesig=None):
 
     check_explanation(data, graph, explanator)
 
-@reproduce_failure('3.73.3', b'AXicY2AgFjAyMDIyghkAAFQABg==')
 @given(strategies.data())
 def test_boolean(data):
     check_theory(data, BooleanTheory, BooleanSig)
@@ -113,8 +116,8 @@ def test_boolean_ext(data):
     check_theory(data, BooleanExtTheory, BooleanExtSig)
 
 if __name__ == "__main__":
-    #  test_parse()
-    #  test_list_elements()
-    #  test_parse_eq()
+    test_parse()
+    test_list_elements()
+    test_parse_eq()
     test_boolean()
-    #  test_boolean_ext()
+    test_boolean_ext()

@@ -160,7 +160,7 @@ BooleanExtTheory = \
          "impl(x, impl(y, z)) = impl(impl(x, y), impl(x, z))"] +
         comm_assoc('xor', '0') +
         ["xor(1, x) = not(x)"] +
-        ["eq(x, y) = xor(x, y)"])
+        ["eq(x, y) = not(xor(x, y))"])
 
 IntegerSig = \
     make_evaluable_sig(

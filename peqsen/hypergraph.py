@@ -53,6 +53,7 @@ class Node(GloballyIndexed):
         self.outgoing = set()
         self.to_be_removed = False
         self.merged = None
+        self.merge_reason = None
 
     def __repr__(self):
         return some_name(hash(self)) + str(self._global_index) + \
@@ -223,7 +224,7 @@ class ByCongruence:
     lhs = attr.ib()
     rhs = attr.ib()
 
-@attr.s(slots=True, frozen=True, cmp=False)
+@attr.s(slots=True, frozen=True, cmp=False, hash=False)
 class ByRule:
     rule = attr.ib()
     match = attr.ib()
@@ -237,6 +238,9 @@ class IthElementReason:
     reason = attr.ib()
     index = attr.ib()
 
+@attr.s(slots=True, frozen=True)
+class MultipleReason:
+    reasons = attr.ib()
 
 class Listener:
     def on_add(self, hypergraph, elements):
@@ -432,6 +436,7 @@ class Hypergraph:
                 # if len(n1.incoming) + len(n1.outgoing) > len(n2.incoming) + len(n2.outgoing):
                 #     (n1, n2) = (n2, n1)
                 n1.merged = n2
+                n1.merge_reason = reason
                 removed = []
                 added = []
                 # This order: out then in is important
@@ -449,8 +454,9 @@ class Hypergraph:
                                 self._hyperedges.get((h.label, tuple(h.dst))).remove(h)
 
                         if h.merged is None:
+                            h_reason = IthElementReason(MultipleReason((h.reason, reason)), 0)
                             new_h = Hyperedge(h.label, new_src, new_dst,
-                                              reason=h.reason)
+                                              reason=h_reason)
                             new_h.to_be_removed = h.to_be_removed
                             h.merged = self._add_hyperedge(new_h, added, to_merge)
                         h.to_be_removed = True
