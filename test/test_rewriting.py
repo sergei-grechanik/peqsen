@@ -42,13 +42,17 @@ def test_parse_eq(data):
     assert h1.isomorphic(h2)
 
 def check_explanation(data, graph, explanator):
-    multinodes = [n for n in graph.nodes() if len(n.outgoing) > 1]
+    multinodes = [n for n in graph.nodes() if len(n.outgoing) + len(n.incoming) > 1]
 
     if multinodes:
         node = data.draw(strategies.sampled_from(multinodes))
-        h1, h2 = data.draw(strategies.sets(strategies.sampled_from(sorted(node.outgoing)),
-                                           min_size=2, max_size=2))
-        script = explanator.script([h1, h2, (IncidentNode(h1), IncidentNode(h2))])
+        inc_list = sorted(IncidentNode.all_for_node(node))
+        inc1 = data.draw(strategies.sampled_from(inc_list))
+        inc_list.remove(inc1)
+        inc2 = data.draw(strategies.sampled_from(inc_list))
+        h1 = inc1.hyperedge
+        h2 = inc2.hyperedge
+        script = explanator.script([h1, h2, (inc1, inc2)])
         print("Chosen")
         print(h1)
         print(h2)
@@ -64,7 +68,7 @@ def check_explanation(data, graph, explanator):
         print(new_graph)
         print()
         assert hh1.label == h1.label and hh2.label == h2.label
-        assert hh1.src == hh2.src
+        assert hh1.incident(inc1.index) == hh2.incident(inc2.index)
     else:
         print("No multinode")
         pass
@@ -115,9 +119,14 @@ def test_boolean(data):
 def test_boolean_ext(data):
     check_theory(data, BooleanExtTheory, BooleanExtSig)
 
+@given(strategies.data())
+def test_integer(data):
+    check_theory(data, IntegerTheory, IntegerSig)
+
 if __name__ == "__main__":
     test_parse()
     test_list_elements()
     test_parse_eq()
     test_boolean()
     test_boolean_ext()
+    test_integer()

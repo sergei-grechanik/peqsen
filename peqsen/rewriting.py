@@ -4,7 +4,7 @@ import collections
 import attr
 
 from peqsen import Listener, Node, Hyperedge, Hypergraph, Term, TriggerManager, parse, \
-    still_match, ByRule, IthElementReason, list_term_elements
+    still_match, ByRule, IthElementReason, list_term_elements, leaf_nodes
 
 @attr.s(slots=True, frozen=True, cmp=False)
 class Rule:
@@ -40,11 +40,22 @@ def equality_to_rule(equality, reverse=False, destructive=False, name=None):
     if name is None:
         name = ("(rev)" if reverse else "") + ("(des)" if destructive else "") + equality.name
 
+    rhs_leaf_nodes = leaf_nodes(rhs)
+
     rule_container = []
 
     def _rewrite(match, lhs_hyperedge=lhs_hyperedge, lhs=lhs, rhs=rhs,
-                 destructive=destructive, rule_container=rule_container):
+                 destructive=destructive, rule_container=rule_container,
+                 rhs_leaf_nodes=rhs_leaf_nodes):
         reason = ByRule(rule_container[0], match)
+
+        # If there are nodes in rhs that has no corresponding match from the lhs, we should create
+        # new nodes for them (like x -> and(x, or(x, y)), y is such a node)
+        for n in rhs_leaf_nodes:
+            if not n in match:
+                match = dict(match)
+                match[n] = Node()
+
         if isinstance(rhs, Term):
             to_add = list_term_elements(rhs.apply_map(match), top_node=match[lhs], reason=reason)
             if destructive:

@@ -5,7 +5,7 @@ import attr
 
 from peqsen import Listener, Node, Hyperedge, Hypergraph, Term, TriggerManager, parse, \
     still_match, match_follow, ByRule, ByCongruence, IthElementReason, Rule, CongruenceRule, \
-    AddTermReason, MultipleReason, list_term_elements, some_name, GloballyIndexed
+    AddTermsReason, MultipleReason, list_term_elements, some_name, GloballyIndexed
 
 from peqsen import util
 
@@ -73,8 +73,8 @@ class RunAllScript:
     subscripts = attr.ib()
 
 @attr.s(frozen=True)
-class AddTermScript:
-    term = attr.ib()
+class AddTermsScript:
+    terms = attr.ib()
 
 # These are compared by reference
 @attr.s(frozen=True, cmp=False, hash=False)
@@ -143,9 +143,9 @@ def dump_script(script, cache=None):
         codes.append("{} = Rule {}\n        Match {}".format(someid, script.rule, match))
         cache[script] = someid
         return "\n".join(c for c in codes if c != "")
-    elif isinstance(script, AddTermScript):
+    elif isinstance(script, AddTermsScript):
         someid = some_name(script)
-        code = "{} = Term {}".format(someid, script.term)
+        code = "{} = Terms {}".format(someid, script.terms)
         cache[script] = someid
         return code
     else:
@@ -212,13 +212,19 @@ def run_script(hypergraph, script, cache=None):
 
         cache[script] = added
         return added
-    elif isinstance(script, AddTermScript):
-        added = hypergraph.rewrite(add=list_term_elements(script.term))
+    elif isinstance(script, AddTermsScript):
+        added = hypergraph.rewrite(add=script.terms)[len(script.terms):]
+        res = []
+        start = 0
+        for t in script.terms:
+            tsize = len(list_term_elements(t))
+            res.append(added[start:start + tsize])
+            start += tsize
+        cache[script] = res
         print()
-        print("Adding term", script.term)
+        print("Adding terms", script.terms)
         print(hypergraph)
-        cache[script] = added
-        return added
+        return res
     else:
         raise ValueError("Don't know how to runs script {}".format(script))
 
@@ -279,6 +285,8 @@ class ExplanationTracker(Listener):
                 print()
 
     def join_nodes(self, node1, node2):
+        node1_orig = node1
+        node2_orig = node2
         path1 = [node1]
         path2 = [node2]
 
@@ -293,16 +301,19 @@ class ExplanationTracker(Listener):
                 if node1 is not None: path1.append(node1)
                 if node2 is not None: path2.append(node2)
                 if node1 is None and node2 is None:
-                    raise RuntimeError("Cannot join nodes {} and {}".format(node1, node2))
+                    raise RuntimeError("Cannot join nodes {} and {}".format(node1_orig, node2_orig))
 
     def script_for_merge(self, incident1, incident2, cache):
+        print()
+        print("Required merge", incident1, incident2)
+        print()
         pair = (incident1, incident2)
 
         if pair in cache:
             return cache[pair]
 
         node1 = incident1.hyperedge.incident(incident1.index)
-        node2 = incident1.hyperedge.incident(incident2.index)
+        node2 = incident2.hyperedge.incident(incident2.index)
         paths = self.join_nodes(node1, node2)
 
         print("====================")
@@ -328,6 +339,9 @@ class ExplanationTracker(Listener):
         return res
 
     def script_for_reason(self, reason, cache):
+        print()
+        print("Required reason", reason)
+        print()
         if reason in cache:
             #  print()
             #  print("script_for_reason", reason)
@@ -346,8 +360,8 @@ class ExplanationTracker(Listener):
         elif isinstance(reason, ByCongruence):
             rule, match = make_congruence_rule_and_match(reason.lhs, reason.rhs)
             res = RuleApplicationScript(rule, self.script_for_match(match, cache))
-        elif isinstance(reason, AddTermReason):
-            res = AddTermScript(reason.term)
+        elif isinstance(reason, AddTermsReason):
+            res = AddTermsScript(reason.terms)
         elif isinstance(reason, IthElementReason):
             res = IthElementScript(self.script_for_reason(reason.reason, cache), reason.index)
         elif isinstance(reason, IncidentNode):

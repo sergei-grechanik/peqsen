@@ -158,7 +158,7 @@ def term(sexpr, dst=None):
 def list_term_elements(term, top_node=None, reason=None, index=0):
     """Convert a term into a list of hyperedges and nodes."""
     if reason is None:
-        reason = AddTermReason(term)
+        reason = AddTermsReason((term,))
 
     if isinstance(term, Term):
         if top_node is None:
@@ -188,6 +188,12 @@ def list_term_elements(term, top_node=None, reason=None, index=0):
         if top_node is not None:
             raise ValueError("Cannot apply top_node to a trivial term")
         return [term]
+
+def leaf_nodes(term):
+    if isinstance(term, Node):
+        return [term]
+    else:
+        return [n for d in term.dst for n in leaf_nodes(d)]
 
 def list_descendants(node, history=set()):
     if isinstance(node, Node):
@@ -230,8 +236,8 @@ class ByRule:
     match = attr.ib()
 
 @attr.s(slots=True, frozen=True)
-class AddTermReason:
-    term = attr.ib()
+class AddTermsReason:
+    terms = attr.ib()
 
 @attr.s(slots=True, frozen=True)
 class IthElementReason:
@@ -326,15 +332,21 @@ class Hypergraph:
         if isinstance(add, (Node, Hyperedge, Term)):
             add = [add]
 
+        # Since terms may share nodes, we have to create a single reason for them
+        terms = [t for t in add if isinstance(t, Term)]
+        term_reason = AddTermsReason(tuple(terms))
+
         # Transform Terms into nodes and hyperedges
         add_copy = add
         add = []
         post_add = []
+        iterm = 0
         for e in add_copy:
             if isinstance(e, Term):
-                term_elements = list_term_elements(e)
+                term_elements = list_term_elements(e, reason=IthElementReason(term_reason, iterm))
+                iterm += 1
                 add.append(term_elements[0])
-                post_add.extend(term_elements[1:])
+                post_add.extend(term_elements)
             else:
                 add.append(e)
         add.extend(post_add)
@@ -433,8 +445,8 @@ class Hypergraph:
             n2 = n2.follow()
             if n1 != n2:
                 # Sorting may break our implementation of cong closure, not sure
-                # if len(n1.incoming) + len(n1.outgoing) > len(n2.incoming) + len(n2.outgoing):
-                #     (n1, n2) = (n2, n1)
+                if len(n1.incoming) + len(n1.outgoing) > len(n2.incoming) + len(n2.outgoing):
+                   (n1, n2) = (n2, n1)
                 n1.merged = n2
                 n1.merge_reason = reason
                 removed = []
@@ -512,9 +524,9 @@ class Hypergraph:
 
     def _add_hyperedge(self, hyperedge, added, to_merge):
         # Create the source
-        # NOTE: We do this before checking if there is an existing congruent hyperedge because we
+        # TODO: We do this before checking if there is an existing congruent hyperedge because we
         # need explanations and they are easier to get if we do merging by congruence as a separate
-        # step
+        # step. There is a hypothesis that this is actually not needed and we can do this after.
         if hyperedge.src is None:
             hyperedge.src = Node()
             self._nodes.add(hyperedge.src)

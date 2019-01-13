@@ -69,12 +69,14 @@ class Theory:
     signature = attr.ib()
     equalities = attr.ib()
 
-def make_evaluable_sig(labels2funs, generate):
+def make_evaluable_sig(labels2funs, generate, propagate_none=False):
     signature = {}
     evaluate = {}
     for l, f in labels2funs.items():
         if callable(f):
             signature[l] = len(inspect.signature(f).parameters)
+            if propagate_none:
+                f = lambda *args, f=f: None if None in args else f(*args)
             evaluate[l] = f
         else:
             signature[l] = 0
@@ -169,6 +171,15 @@ IntegerSig = \
          'add': lambda x, y: x + y,
          'mul': lambda x, y: x * y,
          'neg': lambda x: -x,
-         'div': lambda x, y: x//y if y >= 0 else (x - (x % (-y)))//y,
-         'mod': lambda x, y: x % y if y >= 0 else x % (-y)},
-        strategies.booleans())
+         'div': lambda x, y: x//y if y > 0 else None if y == 0 else (x - (x % (-y)))//y,
+         'mod': lambda x, y: x % y if y > 0 else None if y == 0 else x % (-y)},
+        strategies.integers(),
+        propagate_none=True)
+
+IntegerTheory = \
+    make_theory(
+        IntegerSig.signature,
+        comm_assoc('add', '0') +
+        comm_assoc('mul', '1') +
+        distrib_left('mul', 'add') +
+        ["add(x, neg(x)) = 0"])
