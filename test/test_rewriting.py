@@ -43,15 +43,22 @@ def check_explanation(data, graph, explanator):
     multinodes = [n for n in graph.nodes() if len(n.outgoing) > 1]
 
     if multinodes:
-        print("Yes!!!!!!!!!!!!")
         node = data.draw(strategies.sampled_from(multinodes))
         h1, h2 = data.draw(strategies.sets(strategies.sampled_from(sorted(node.outgoing)),
                                            min_size=2, max_size=2))
         script = explanator.script([h1, h2, (IncidentNode(h1), IncidentNode(h2))])
-        print("script", script)
+        print("Chosen")
+        print(h1)
+        print(h2)
+        print("script")
+        print(script)
+        print()
 
         new_graph = Hypergraph()
         hh1, hh2, *_ = run_script(new_graph, script)
+        print("New graph:")
+        print(new_graph)
+        print()
         assert hh1.label == h1.label and hh2.label == h2.label
         assert hh1.src == hh2.src
     else:
@@ -77,24 +84,26 @@ def check_theory(data, theory, evaluablesig=None):
     terms = data.draw(strategies.lists(gen_term(theory.signature, variables=variables), max_size=5))
     graph.rewrite(add=terms)
 
-    #  print("===============================================")
-    #  print()
-    #  print("Terms:")
-    #  for t in terms: print(t)
-    #  print()
-    #  print("Initial graph")
-    #  print(graph)
+    print("===============================================")
+    print()
+    print("Terms:")
+    for t in terms: print(t)
+    print()
+    print("Initial graph")
+    print(graph)
+    print()
 
     for i in range(data.draw(strategies.integers(1, 20))):
         rewriter.perform_rewriting(max_n=10)
 
-    #  print()
-    #  print("Rewritten graph")
-    #  print(graph)
+    print()
+    print("Rewritten graph")
+    print(graph)
+    print()
 
     check_explanation(data, graph, explanator)
 
-@reproduce_failure('3.73.3', b'AXicY2DADRhReYyMDExgBgAAdAAI')
+@reproduce_failure('3.73.3', b'AXicY2AgFjAyMDIyghkAAFQABg==')
 @given(strategies.data())
 def test_boolean(data):
     check_theory(data, BooleanTheory, BooleanSig)

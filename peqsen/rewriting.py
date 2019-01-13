@@ -106,6 +106,11 @@ class Rewriter(Listener):
 
         rewrite = {'remove': [], 'add': [], 'merge': []}
         for tup in rule_match_rw_score[:max_n]:
+            print("Applying")
+            print(tup[0])
+            print(tup[1])
+            print(tup[2])
+            print()
             for field in rewrite:
                 rewrite[field].extend(tup[2].get(field, []))
 

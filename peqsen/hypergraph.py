@@ -6,11 +6,12 @@ import itertools
 import networkx
 import hypothesis
 import inspect
+import zlib
 
 from hypothesis import strategies
 
 def some_name(obj, length=5):
-    h = hash(obj)
+    h = zlib.crc32(str(hash(obj)).encode('ASCII'))
     res = ""
     consonant = True
     consonants = "rtpsdfghjklzxvbnm"
@@ -504,6 +505,15 @@ class Hypergraph:
         return res
 
     def _add_hyperedge(self, hyperedge, added, to_merge):
+        # Create the source
+        # NOTE: We do this before checking if there is an existing congruent hyperedge because we
+        # need explanations and they are easier to get if we do merging by congruence as a separate
+        # step
+        if hyperedge.src is None:
+            hyperedge.src = Node()
+            self._nodes.add(hyperedge.src)
+            added.append(hyperedge.src)
+
         # First, check if an equivalent hyperedge exists
         if self._congruence:
             existing = self._hyperedges.get((hyperedge.label, tuple(hyperedge.dst)))
@@ -527,12 +537,6 @@ class Hypergraph:
                         return h
 
         # Now this hyperedge should be added as a new hyperedge
-
-        # Crete the source
-        if hyperedge.src is None:
-            hyperedge.src = Node()
-            self._nodes.add(hyperedge.src)
-            added.append(hyperedge.src)
 
         hyperedge.src.outgoing.add(hyperedge)
         for d in hyperedge.dst:
