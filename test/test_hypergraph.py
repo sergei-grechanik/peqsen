@@ -324,7 +324,6 @@ def test_listener(data):
         h2.rewrite(add=lis.to_add)
         assert h1.isomorphic(h2)
 
-@reproduce_failure('3.73.3', b'AXicY2JkwATMIEFGMGKAyENYjIxMQIIJLsrAAAACsgAW')
 @given(strategies.data())
 def test_smallest_hyperedge_tracker(data):
     for congruence in [True, False]:
@@ -361,11 +360,7 @@ def test_smallest_hyperedge_tracker(data):
                 if terms:
                     (min_val1, _, min_term1) = min(terms, key=lambda x: x[0])
                     (_, min_val2, min_term2) = min(terms, key=lambda x: x[1])
-                    print()
-                    print(n)
-                    print(h1)
-                    print(min_val1, min_term1)
-                    print(set(tracker1.smallest_terms(n)))
+
                     assert min_val1 == tracker1.smallest[n][0]
                     assert min_val2 == tracker2.smallest[n][0]
 
@@ -453,7 +448,6 @@ if __name__ == "__main__":
     test_rewrite_noremove_order()
     test_rewrite_remove_order()
     test_listener()
-    # TODO: the smallest hyperedge tracker is buggy and unmaintainable
-    #  test_smallest_hyperedge_tracker()
+    test_smallest_hyperedge_tracker()
     test_pattern_is_acyclic()
     test_stat()

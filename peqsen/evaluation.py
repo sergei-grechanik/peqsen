@@ -91,9 +91,12 @@ class SimpleEvaluator(Listener):
                         for i in range(self._num_models):
                             if reference_values[i] != computed[i]:
                                 print(hypergraph)
+                                for node, vs in self._node_to_values.items():
+                                    print("{}[{}] = {}".format(node, i, vs[i]))
                                 raise RuntimeError("Hyperedge {} evaluated on {}-th model to "
                                                    "a value:\n{}\nbut expected:\n{}"
-                                                   .format(e, i, computed[i], reference_values[i]))
+                                                   .format(e, i, computed[i],
+                                                           reference_values[i]))
 
         for e in elements:
             _eval(e)

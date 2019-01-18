@@ -27,6 +27,9 @@ def some_name(obj, length=5):
     return res
 
 class GloballyIndexed:
+    """Base class for objects whose hash is based on the order of creation. This is needed to
+    ensure determinism. Note that there may be objects with the same global index, this simply may
+    lead to more frequent hash collisions, but shouldn't be a problem otherwise."""
     global_index = 0
 
     @staticmethod
@@ -68,7 +71,6 @@ class Node(GloballyIndexed):
 
     def with_reason(self, reason):
         return self
-
 
 class Hyperedge(GloballyIndexed):
     def __init__(self, label, src=None, dst=None, reason=None):
@@ -203,6 +205,18 @@ def list_descendants(node, history=set()):
         return [node] + [e for h in node.outgoing for e in list_descendants(h, new_history)]
     elif isinstance(node, Hyperedge):
         return [node] + [e for d in node.dst for e in list_descendants(d, history)]
+
+def term_size(term):
+    if isinstance(term, Node):
+        return 1
+    else:
+        return 1 + sum(term_size(t) for t in term.dst)
+
+def term_depth(term):
+    if isinstance(term, Node):
+        return 1
+    else:
+        return 1 + max(term_depth(t) for t in term.dst)
 
 @attr.s(slots=True, frozen=True)
 class Equality:

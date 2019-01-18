@@ -205,10 +205,6 @@ def run_script(hypergraph, script, cache=None):
 
         rw = script.rule.rewrite(match)
         added = hypergraph.rewrite(**rw)
-        print()
-        print("Applying rule", script.rule)
-        print("Match", match)
-        print(hypergraph)
 
         cache[script] = added
         return added
@@ -221,9 +217,6 @@ def run_script(hypergraph, script, cache=None):
             res.append(added[start:start + tsize])
             start += tsize
         cache[script] = res
-        print()
-        print("Adding terms", script.terms)
-        print(hypergraph)
         return res
     else:
         raise ValueError("Don't know how to runs script {}".format(script))
@@ -253,11 +246,6 @@ class ExplanationTracker(Listener):
 
     def on_add(self, hypergraph, elements):
         for e in elements:
-            if isinstance(e, Hyperedge):
-                print()
-                print("Added hyperedge", e)
-                print("  reason", e.reason)
-                print()
             if isinstance(e, Node):
                 if e not in self.node_first_hyperedges:
                     incs = IncidentNode.all_for_node(e)
@@ -265,24 +253,9 @@ class ExplanationTracker(Listener):
                         self.node_first_hyperedges[e] = incs[0]
                     else:
                         self.node_first_hyperedges[e] = FreeNodeReason()
-                    print()
-                    print("Node_reason", e, self.node_first_hyperedges[e])
-                    print()
 
     def on_merge(self, hypergraph, node, removed, added, reason):
         assert node.merge_reason == reason
-
-        print()
-        print("Merged", node)
-        print("  reason", node.merge_reason)
-        print()
-
-        for e in added:
-            if isinstance(e, Hyperedge):
-                print()
-                print("Added hyperedge", e)
-                print("  reason", e.reason)
-                print()
 
     def join_nodes(self, node1, node2):
         node1_orig = node1
@@ -304,9 +277,6 @@ class ExplanationTracker(Listener):
                     raise RuntimeError("Cannot join nodes {} and {}".format(node1_orig, node2_orig))
 
     def script_for_merge(self, incident1, incident2, cache):
-        print()
-        print("Required merge", incident1, incident2)
-        print()
         pair = (incident1, incident2)
 
         if pair in cache:
@@ -315,14 +285,6 @@ class ExplanationTracker(Listener):
         node1 = incident1.hyperedge.incident(incident1.index)
         node2 = incident2.hyperedge.incident(incident2.index)
         paths = self.join_nodes(node1, node2)
-
-        print("====================")
-        print("paths[0]", paths[0])
-        for path in paths[1:]:
-            for p in path:
-                print(p)
-            print("---------------")
-        print("====================")
 
         subscripts = []
         for path in paths[1:]:
@@ -339,14 +301,7 @@ class ExplanationTracker(Listener):
         return res
 
     def script_for_reason(self, reason, cache):
-        print()
-        print("Required reason", reason)
-        print()
         if reason in cache:
-            #  print()
-            #  print("script_for_reason", reason)
-            #  print("cached")
-            #  print()
             res = cache[reason]
             if res is None:
                 raise ValueError("Recursion detected while building an explanation: {}"
@@ -373,21 +328,11 @@ class ExplanationTracker(Listener):
         else:
             raise RuntimeError("Unsupported reason: {}".format(reason))
 
-        #  print()
-        #  print("script_for_reason", reason)
-        #  print(dump_script(res))
-        #  print()
-
         cache[reason] = res
         return res
 
     def script_for_hyperedge(self, hyperedge, cache):
         script = self.script_for_reason(hyperedge.reason, cache)
-        print()
-        print("script_for_hyperedge", hyperedge)
-        print("reason", hyperedge.reason)
-        print(dump_script(script))
-        print()
         return script
 
     def script_for_match(self, match, cache):

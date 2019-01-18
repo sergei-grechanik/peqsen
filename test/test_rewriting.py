@@ -53,20 +53,11 @@ def check_explanation(data, graph, explanator):
         h1 = inc1.hyperedge
         h2 = inc2.hyperedge
         script = explanator.script([h1, h2, (inc1, inc2)])
-        print("Chosen")
-        print(h1)
-        print(h2)
-        print("script")
-        print(dump_script(script))
-        print()
 
         new_graph = Hypergraph()
         hh1, hh2, *_ = run_script(new_graph, script)
         hh1 = hh1.follow()
         hh2 = hh2.follow()
-        print("New graph:")
-        print(new_graph)
-        print()
         assert hh1.label == h1.label and hh2.label == h2.label
         assert hh1.incident(inc1.index) == hh2.incident(inc2.index)
     else:
@@ -81,6 +72,7 @@ def check_theory(data, theory, evaluablesig=None):
     explanator = ExplanationTracker(graph)
 
     for e in theory.equalities:
+        # Destructivity is not supported by explanation
         destr = False #data.draw(strategies.booleans())
         if data.draw(strategies.booleans()):
             rewriter.add_rule(equality_to_rule(e, destructive=destr))
@@ -92,22 +84,8 @@ def check_theory(data, theory, evaluablesig=None):
     terms = data.draw(strategies.lists(gen_term(theory.signature, variables=variables), max_size=5))
     graph.rewrite(add=terms)
 
-    print("===============================================")
-    print()
-    print("Terms:")
-    for t in terms: print(t)
-    print()
-    print("Initial graph")
-    print(graph)
-    print()
-
     for i in range(data.draw(strategies.integers(1, 20))):
         rewriter.perform_rewriting(max_n=10)
-
-    print()
-    print("Rewritten graph")
-    print(graph)
-    print()
 
     check_explanation(data, graph, explanator)
 

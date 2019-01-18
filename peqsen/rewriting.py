@@ -2,6 +2,7 @@
 import itertools
 import collections
 import attr
+import logging
 
 from peqsen import Listener, Node, Hyperedge, Hypergraph, Term, TriggerManager, parse, \
     still_match, ByRule, IthElementReason, list_term_elements, leaf_nodes
@@ -35,7 +36,9 @@ def equality_to_rule(equality, reverse=False, destructive=False, name=None):
         lhs = node
     else:
         lhs_hyperedge = None
-        assert not destructive, "Not supported"
+        if destructive:
+            logging.warning("LHS is a node, destructivity is ignored")
+            destructive = False
 
     if name is None:
         name = ("(rev)" if reverse else "") + ("(des)" if destructive else "") + equality.name
@@ -117,11 +120,6 @@ class Rewriter(Listener):
 
         rewrite = {'remove': [], 'add': [], 'merge': []}
         for tup in rule_match_rw_score[:max_n]:
-            print("Applying")
-            print(tup[0])
-            print(tup[1])
-            print(tup[2])
-            print()
             for field in rewrite:
                 rewrite[field].extend(tup[2].get(field, []))
 

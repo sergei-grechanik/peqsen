@@ -170,11 +170,8 @@ IntegerSig = \
          '1': 1,
          'add': lambda x, y: x + y,
          'mul': lambda x, y: x * y,
-         'neg': lambda x: -x,
-         'div': lambda x, y: x//y if y > 0 else None if y == 0 else (x - (x % (-y)))//y,
-         'mod': lambda x, y: x % y if y > 0 else None if y == 0 else x % (-y)},
-        strategies.integers(),
-        propagate_none=True)
+         'neg': lambda x: -x},
+        strategies.integers())
 
 IntegerTheory = \
     make_theory(
@@ -182,4 +179,6 @@ IntegerTheory = \
         comm_assoc('add', '0') +
         comm_assoc('mul', '1') +
         distrib_left('mul', 'add') +
-        ["add(x, neg(x)) = 0"])
+        ["add(x, neg(x)) = 0",
+         "neg(neg(x)) = x",
+         "mul(neg(x), y) = neg(mul(x, y))"])
