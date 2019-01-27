@@ -81,6 +81,42 @@ class AddTermsScript:
 class FreeNodeScript:
     pass
 
+def script_length(script):
+    """The size of the script in terms of the number of rule application steps"""
+    seen_scripts = set()
+    result = [0]
+
+    def _process(script, seen_scripts=seen_scripts, result=result):
+        if script not in seen_scripts:
+            seen_scripts.add(script)
+            if isinstance(script, RunAllScript):
+                for s in script.subscripts:
+                    _process(s)
+            elif isinstance(script, IthElementScript):
+                _process(script.script)
+            elif isinstance(script, IncidentNode):
+                _process(script.hyperedge)
+            elif isinstance(script, FreeNodeScript):
+                pass
+            elif isinstance(script, MatchScript):
+                for s in script.hyperedge_scripts.values():
+                    _process(s)
+                for s in script.node_scripts.values():
+                    _process(s)
+                for _, _, s in script.merge_scripts:
+                    _process(s)
+            elif isinstance(script, RuleApplicationScript):
+                _process(script.match_script)
+                if not isinstance(script.rule, CongruenceRule):
+                    result[0] += 1
+            elif isinstance(script, AddTermsScript):
+                pass
+            else:
+                raise ValueError("Don't know how to process script {}".format(script))
+
+    _process(script)
+    return result[0]
+
 def dump_script(script, cache=None):
     if cache is None:
         cache = {}
@@ -125,6 +161,7 @@ def dump_script(script, cache=None):
 
         for in1, in2, ms in script.merge_scripts:
             codes.append(dump_script(ms, cache))
+            codes.append("Merge  {}  and  {}  by {}".format(in1, in2, cache[ms]))
 
         for e in elements:
             if isinstance(e, Node):
@@ -156,17 +193,17 @@ def run_script(hypergraph, script, cache=None):
         cache = {}
 
     if isinstance(script, RunAllScript):
-        return [run_script(hypergraph, s, cache) for s in script.subscripts]
+        result = [run_script(hypergraph, s, cache) for s in script.subscripts]
     elif isinstance(script, IthElementScript):
-        return run_script(hypergraph, script.script, cache)[script.index]
+        result = run_script(hypergraph, script.script, cache)[script.index]
     elif isinstance(script, IncidentNode):
-        return run_script(hypergraph, script.hyperedge, cache).incident(script.index)
+        result = run_script(hypergraph, script.hyperedge, cache).incident(script.index)
     elif script in cache:
-        return cache[script]
+        result = cache[script]
     elif isinstance(script, FreeNodeScript):
         added = hypergraph.rewrite(add=Node())[0]
         cache[script] = added
-        return added
+        result = added
     elif isinstance(script, MatchScript):
         match = {}
         elements = script.elements
@@ -183,13 +220,17 @@ def run_script(hypergraph, script, cache=None):
         for e in elements:
             if isinstance(e, Node):
                 if not e in match:
-                    incident_hyperedges = list(e.outgoing) + list(e.incoming)
-                    if incident_hyperedges:
-                        h = incident_hyperedges[0]
-                        idx = IncidentNode.first_of(h, e).index
-                        match[e] = match[h].incident(idx)
-                    else:
+                    if e in script.node_scripts:
                         match[e] = run_script(hypergraph, script.node_scripts[e], cache)
+                    else:
+                        # As noted somewhere else, there may be no e.outgoing and e.incoming
+                        for h in match:
+                            if isinstance(h, Hyperedge):
+                                incs = IncidentNode.all_of(h, e)
+                                if incs:
+                                    match[e] = match[h].incident(incs[0].index)
+                                    break
+                        assert match[e] is not None
 
         match = match_follow(match)
 
@@ -198,7 +239,7 @@ def run_script(hypergraph, script, cache=None):
                                "doesn't match the hypergraph")
 
         cache[script] = match
-        return match
+        result = match
     elif isinstance(script, RuleApplicationScript):
         match = run_script(hypergraph, script.match_script, cache)
         match = match_follow(match)
@@ -207,7 +248,7 @@ def run_script(hypergraph, script, cache=None):
         added = hypergraph.rewrite(**rw)
 
         cache[script] = added
-        return added
+        result = added
     elif isinstance(script, AddTermsScript):
         added = hypergraph.rewrite(add=script.terms)[len(script.terms):]
         res = []
@@ -217,9 +258,11 @@ def run_script(hypergraph, script, cache=None):
             res.append(added[start:start + tsize])
             start += tsize
         cache[script] = res
-        return res
+        result = res
     else:
         raise ValueError("Don't know how to runs script {}".format(script))
+
+    return result
 
 def make_congruence_rule_and_match(lhs, rhs):
     if lhs.label != rhs.label or lhs.dst != rhs.dst:
@@ -290,10 +333,6 @@ class ExplanationTracker(Listener):
         for path in paths[1:]:
             for p in path[:-1]:
                 sc = self.script_for_reason(p.merge_reason, cache)
-                util.printind()
-                util.printind("Mergescript", p)
-                util.printind("Script", sc)
-                util.printind()
                 subscripts.append(sc)
 
         res = RunAllScript(tuple(subscripts))
@@ -331,11 +370,17 @@ class ExplanationTracker(Listener):
         cache[reason] = res
         return res
 
-    def script_for_hyperedge(self, hyperedge, cache):
+    def script_for_hyperedge(self, hyperedge, cache=None):
+        if cache is None:
+            cache = {}
+
         script = self.script_for_reason(hyperedge.reason, cache)
         return script
 
-    def script_for_match(self, match, cache):
+    def script_for_match(self, match, cache=None):
+        if cache is None:
+            cache = {}
+
         hyperedge_scripts = {}
         node_scripts = {}
         merge_scripts = []
@@ -346,11 +391,10 @@ class ExplanationTracker(Listener):
 
         for e, n in match.items():
             if isinstance(e, Node):
-                incident_hyperedges = [h
-                                       for h in itertools.chain(n.incoming, n.outgoing)
-                                       if h in match]
+                # We cannot loop through e.outgoing and e.incoming because e might be a free node,
+                # outside of any hypergraph, and not containing this information
                 incidents = [inc
-                             for h in incident_hyperedges
+                             for h in match if isinstance(h, Hyperedge)
                              for inc in IncidentNode.all_of(h, e)]
                 incidents_h = [IncidentNode(match[inc.hyperedge], inc.index)
                                for inc in incidents]
@@ -359,7 +403,7 @@ class ExplanationTracker(Listener):
                     s = self.script_for_merge(incidents_h[0], inc_h, cache)
                     merge_scripts.append((incidents[0], inc, s))
 
-                if not incident_hyperedges:
+                if not incidents:
                     # This is a special case: the node has no incident hyperedge within the match,
                     # so we use some outside hyperedge to generate this node
                     if n in self.node_first_hyperedges:
@@ -377,5 +421,10 @@ class ExplanationTracker(Listener):
                 scripts.append(self.script_for_hyperedge(r, cache))
             elif isinstance(r, tuple):
                 scripts.append(self.script_for_merge(r[0], r[1], cache))
+            elif isinstance(r, dict):
+                scripts.append(self.script_for_match(r, cache))
+            else:
+                raise ValueError("Don't know how create a script for {} of type {}"
+                                 .format(r, type(r)))
         return RunAllScript(tuple(scripts))
 

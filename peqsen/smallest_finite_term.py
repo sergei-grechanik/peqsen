@@ -1,16 +1,29 @@
 
 import itertools
-from peqsen import Listener, Node, Hyperedge, Hypergraph, Term
+from peqsen import Listener, Node, Hyperedge, Hypergraph, Term, list_term_elements
 import peqsen
+import attr
+
+@attr.s(slots=True, frozen=True)
+class SelfSufficientNode:
+    @property
+    def merged(self):
+        return self
 
 #@peqsen.util.for_all_methods(peqsen.util.traced)
 class SmallestHyperedgeTracker(Listener):
-    def __init__(self, worst_value=float("inf"), measure=None):
+    def __init__(self, hypergraph=None, worst_value=float("inf"), measure=None,
+                 auto_mark_self_sufficient=False):
         self.smallest = {}
         self.worst_value = worst_value
         if measure is None:
             measure = SmallestHyperedgeTracker.size
         self.measure = measure
+
+        if hypergraph is not None:
+            hypergraph.listeners.add(self)
+
+        self.auto_mark_self_sufficient = auto_mark_self_sufficient
 
     @staticmethod
     def size(label, subvalues):
@@ -19,6 +32,19 @@ class SmallestHyperedgeTracker(Listener):
     @staticmethod
     def depth(label, subvalues):
         return max([0] + subvalues) + 1
+
+    def mark_self_sufficient(self, node=None, value=1):
+        if node is not None:
+            node_smallest = self.smallest.setdefault(node, (self.worst_value, set()))
+            if value < node_smallest[0]:
+                self.smallest[node] = (value, {SelfSufficientNode()})
+                self._update([node])
+            elif value == node_smallest[0]:
+                node_smallest[1].add(SelfSufficientNode())
+        else:
+            for n in self.smallest:
+                if not n.outgoing:
+                    self.mark_self_sufficient(n, value=value)
 
     def _update_node(self, node, to_update):
         for h in node.outgoing:
@@ -60,10 +86,15 @@ class SmallestHyperedgeTracker(Listener):
             if isinstance(e, Node) and not e in self.smallest:
                 self.smallest[e] = (self.worst_value, set())
         self._update(h for h in elements if isinstance(h, Hyperedge))
-        #print()
-        #print("added", elements)
-        #print(hypergraph)
-        #print("smallest now =", self.smallest)
+
+        if self.auto_mark_self_sufficient:
+            for e in elements:
+                if isinstance(e, Node) and not e.outgoing:
+                    self.mark_self_sufficient(e)
+        #  print()
+        #  print("added", elements)
+        #  print(hypergraph)
+        #  print("smallest now =", self.smallest)
 
     def on_merge(self, hypergraph, node, removed, added, reason):
         # If some of the merged (removed) hyperedges were among the smallest,
@@ -127,8 +158,24 @@ class SmallestHyperedgeTracker(Listener):
 
     def smallest_terms(self, node):
         for h in self.smallest[node][1]:
-            for subterms in itertools.product(*[self.smallest_terms(d) for d in h.dst]):
-                yield Term(h.label, subterms)
+            if isinstance(h, SelfSufficientNode):
+                yield node
+            else:
+                for subterms in itertools.product(*[self.smallest_terms(d) for d in h.dst]):
+                    yield Term(h.label, subterms)
+
+    def smallest_matches(self, node, top_node=None):
+        for p in self._smallest_term_matches(node):
+            yield {k: v for k, v in zip(list_term_elements(p[0], top_node=top_node), p[1])}
+
+    def _smallest_term_matches(self, node):
+        for h in self.smallest[node][1]:
+            if isinstance(h, SelfSufficientNode):
+                yield (node, [node])
+            else:
+                for subs in itertools.product(*[self._smallest_term_matches(d) for d in h.dst]):
+                    yield (Term(h.label, [p[0] for p in subs]),
+                           [h.src, h] + [e for p in subs for e in p[1]])
 
 
 def measure_term(term, measure):

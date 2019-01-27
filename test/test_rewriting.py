@@ -65,6 +65,8 @@ def check_explanation(data, graph, explanator):
         pass
 
 def check_theory(data, theory, evaluablesig=None):
+    GloballyIndexed.reset_global_index()
+
     graph = Hypergraph()
     rewriter = Rewriter(graph)
     num_models = data.draw(strategies.integers(1, 20))

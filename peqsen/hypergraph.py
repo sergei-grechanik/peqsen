@@ -127,7 +127,7 @@ class Hyperedge(GloballyIndexed):
     def with_reason(self, reason):
         return Hyperedge(self.label, self.src, self.dst, reason=reason)
 
-@attr.s(slots=True, frozen=True, repr=False, cache_hash=True)
+@attr.s(slots=True, frozen=True, repr=False)
 class Term:
     """A Term. `dst` must be a tuple of other terms or nodes"""
     label = attr.ib()
@@ -145,6 +145,14 @@ class Term:
             return Term(self.label, (d.apply_map(mapping) for d in self.dst))
         else:
             return self.apply_map(mapping)
+
+@attr.s(slots=True, frozen=True, repr=False)
+class Var:
+    """A label representing a variable."""
+    name = attr.ib()
+
+    def __repr__(self):
+        return "$" + str(self.name)
 
 def term(sexpr, dst=None):
     if dst is None:
@@ -213,7 +221,7 @@ def term_size(term):
         return 1 + sum(term_size(t) for t in term.dst)
 
 def term_depth(term):
-    if isinstance(term, Node):
+    if isinstance(term, Node) or len(term.dst) == 0:
         return 1
     else:
         return 1 + max(term_depth(t) for t in term.dst)
