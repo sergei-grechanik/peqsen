@@ -9,8 +9,11 @@ from peqsen import Listener, Node, Hyperedge, Hypergraph, Term, TriggerManager, 
 
 from peqsen import util
 
+class Script:
+    pass
+
 @attr.s(slots=True, frozen=True)
-class IncidentNode:
+class IncidentNode(Script):
     """An incident node/point of a hyperedge or a representation of a hyperedge. Index -1 means the
     source node, index >= 0 means the dst index."""
     hyperedge = attr.ib()
@@ -46,12 +49,12 @@ class IncidentNode:
 
 # These are compared by reference
 @attr.s(frozen=True, cmp=False, hash=False)
-class FreeNodeReason:
+class FreeNodeReason(Script):
     pass
 
 # These are compared by reference
 @attr.s(frozen=True, cmp=False, hash=False)
-class MatchScript:
+class MatchScript(Script):
     elements = attr.ib()
     hyperedge_scripts = attr.ib()
     merge_scripts = attr.ib()
@@ -59,26 +62,26 @@ class MatchScript:
 
 # These are compared by reference
 @attr.s(frozen=True, cmp=False, hash=False)
-class RuleApplicationScript:
+class RuleApplicationScript(Script):
     rule = attr.ib()
     match_script = attr.ib()
 
 @attr.s(frozen=True)
-class IthElementScript:
+class IthElementScript(Script):
     script = attr.ib()
     index = attr.ib()
 
 @attr.s(frozen=True)
-class RunAllScript:
+class RunAllScript(Script):
     subscripts = attr.ib()
 
 @attr.s(frozen=True)
-class AddTermsScript:
+class AddTermsScript(Script):
     terms = attr.ib()
 
 # These are compared by reference
 @attr.s(frozen=True, cmp=False, hash=False)
-class FreeNodeScript:
+class FreeNodeScript(Script):
     pass
 
 def script_length(script):
@@ -277,7 +280,7 @@ def make_congruence_rule_and_match(lhs, rhs):
     for d, ld in zip(dst, lhs.dst):
         match[d] = ld
 
-    rule = CongruenceRule()
+    rule = CongruenceRule(lhs.label, len(dst))
 
     return (rule, match)
 

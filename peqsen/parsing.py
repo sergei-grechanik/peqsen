@@ -3,7 +3,7 @@ import lark
 from lark import Lark
 
 import peqsen.util
-from peqsen import Node, Hyperedge, Term, Equality
+from peqsen import Node, Hyperedge, Term, Equality, Var
 
 class _ParsedTermTransformer(lark.Transformer):
     """Each function returns a pair (f, xs) where xs is the set of free variables and f is a
@@ -16,7 +16,13 @@ class _ParsedTermTransformer(lark.Transformer):
                 xs1 | xs2)
     def call(self, x):
         (lbl, args) = x
-        #lbl = lbl.value
+        if isinstance(lbl, str) and lbl[0] == '$':
+            varname = lbl[1:]
+            try:
+                varname = int(varname)
+            except ValueError:
+                pass
+            lbl = Var(varname)
         return ((lambda d, **_: Term(lbl, [a[0](d) for a in args])),
                 set().union(*(a[1] for a in args)))
     def variable(self, tname):
@@ -37,8 +43,8 @@ _term_parser = Lark(r"""
     const: CONST_NAME
     arglist: "(" [term ("," term)*] ","? ")"
 
-    LABEL_NAME: ("_" | LETTER | DIGIT)+
-    CONST_NAME: (UCASE_LETTER | DIGIT) ("_" | LETTER | DIGIT | SYMBOL)*
+    LABEL_NAME: ("_" | LETTER | DIGIT | "$") ("_" | LETTER | DIGIT)*
+    CONST_NAME: (UCASE_LETTER | DIGIT | "$") ("_" | LETTER | DIGIT | SYMBOL)*
     VAR_NAME: ("_" | LCASE_LETTER) ("_" | LETTER | DIGIT)*
     SYMBOL: /[$-]/
 

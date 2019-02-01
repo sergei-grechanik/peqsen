@@ -4,12 +4,17 @@ from peqsen import *
 import hypothesis
 from hypothesis import given, strategies, reproduce_failure, seed
 
+import pickle
 import sys
 import attr
-
-import joblib
 import random
 import os
+
+@attr.s()
+class MinimizedTerm:
+    original : Term = attr.ib()
+    minimized : Term = attr.ib()
+    script : Script = attr.ib()
 
 def generate_term(signature, size, variables=None):
     if variables is None:
@@ -29,9 +34,6 @@ def generate_term(signature, size, variables=None):
         subterms = [generate_term(signature, subsize, variables) for subsize in buckets]
         return Term(label, subterms)
 
-memory = joblib.Memory("~/.peqsen/")
-
-@memory.cache
 def boolean_terms(min_size=10, max_size=200, count_per_size=10, variables=3, seed=42):
     random.seed(seed)
     res = []
@@ -50,8 +52,8 @@ def minimize_naively(term, script, theory, max_steps=1000):
     smallest_tracker = SmallestHyperedgeTracker(graph)
 
     for e in theory.equalities:
-        rewriter.add_rule(equality_to_rule(e))
-        rewriter.add_rule(equality_to_rule(e, reverse=True))
+        rewriter.add_rule(EqualityRule(e))
+        rewriter.add_rule(EqualityRule(e, reverse=True))
 
     added_elements = graph.rewrite(add=term)[1:]
     term_node = added_elements[0]
@@ -103,9 +105,30 @@ def minimize_repeatedly(term, theory, max_steps=1000):
         if script_length(new_script) >= max_steps:
             break
 
+    return best_term, best_script
     print()
 
+def some_naively_minimized_terms(val):
+    tuples = []
+    for t in list(boolean_terms(min_size=5, max_size=6)):
+        newterm, script = minimize_repeatedly(t, BooleanTheory)
+        tuples.append(MinimizedTerm(t, newterm, script))
+    return tuples
+
+def pickled(filename, func):
+    filename = os.path.expanduser(os.path.join("~/.peqsen", filename))
+    if os.path.isfile(filename):
+        return pickle.load(open(filename, 'rb'))
+    else:
+        res = func()
+        pickle.dump(res, open(filename, 'wb'))
+        return res
+
 if __name__ == "__main__":
-    for t in list(boolean_terms(max_size=20))[2:]:
-        minimize_repeatedly(t, BooleanTheory)
+    for minimized in pickled("some_terms", lambda: some_naively_minimized_terms(10)):
+        print()
+        print(minimized.original)
+        print(minimized.minimized)
+        print(term_size(minimized.original), " -> ", term_size(minimized.minimized),
+              "steps", script_length(minimized.script))
 

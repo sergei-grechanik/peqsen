@@ -58,6 +58,9 @@ class Node(GloballyIndexed):
         self.merged = None
         self.merge_reason = None
 
+    def __getnewargs__(self):
+        return ()
+
     def __repr__(self):
         return some_name(hash(self)) + str(self._global_index) + \
             ("(->" + repr(self.merged) + ")" if self.merged else "")
@@ -85,6 +88,9 @@ class Hyperedge(GloballyIndexed):
         self.to_be_removed = False
         self.merged = None
         self.reason = reason
+
+    def __getnewargs__(self):
+        return (self.label, self.src, self.dst, self.reason)
 
     def __repr__(self):
         label = self.label if isinstance(self.label, str) else repr(self.label)

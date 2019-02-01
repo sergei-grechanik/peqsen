@@ -7,74 +7,93 @@ import logging
 from peqsen import Listener, Node, Hyperedge, Hypergraph, Term, TriggerManager, parse, \
     still_match, ByRule, IthElementReason, list_term_elements, leaf_nodes
 
-@attr.s(slots=True, frozen=True, cmp=False)
 class Rule:
-    name = attr.ib()
-    trigger = attr.ib()
-    rewrite = attr.ib()
+    def __init__(self, name=None, trigger=None):
+        self.name = name
+        self.trigger = trigger
 
-@attr.s(slots=True, frozen=True, cmp=False)
-class CongruenceRule:
-    name = attr.ib(default="congruence")
-    trigger = attr.ib(default=None)
-    rewrite = attr.ib(default=lambda _: {})
+    def rewrite(self, match):
+        pass
 
-def equality_to_rule(equality, reverse=False, destructive=False, name=None):
-    equality = parse(equality)
-    lhs = equality.lhs
-    rhs = equality.rhs
+    def __repr__(self):
+        return "Rule(" + self.name + ")"
 
-    if not isinstance(lhs, (Term, Node)) or not isinstance(rhs, (Term, Node)):
-        raise ValueError("Both lhs and rhs of the equality should be Terms or nodes: {} = {}"
-                         .format(lhs, rhs))
+class CongruenceRule(Rule):
+    def __init__(self, label, arity):
+        self.name = "congruence(" + str(label) + ")"
 
-    if reverse:
-        lhs, rhs = rhs, lhs
+        lsrc, rsrc = Node(), Node()
+        dst = [Node() for _ in range(arity)]
+        h1 = Hyperedge(label, lsrc, dst)
+        h2 = Hyperedge(label, rsrc, dst)
 
-    if isinstance(lhs, Term):
-        node, lhs_hyperedge, *_ = list_term_elements(lhs)
-        lhs = node
-    else:
-        lhs_hyperedge = None
-        if destructive:
-            logging.warning("LHS is a node, destructivity is ignored")
-            destructive = False
+        self.trigger = (h1, h2)
 
-    if name is None:
-        name = ("(rev)" if reverse else "") + ("(des)" if destructive else "") + equality.name
+    def rewrite(self, match):
+        return {}
 
-    rhs_leaf_nodes = leaf_nodes(rhs)
+class EqualityRule(Rule):
+    def __init__(self, equality, reverse=False, destructive=False, name=None):
+        equality = parse(equality)
 
-    rule_container = []
+        if name is None:
+            name = ("(rev)" if reverse else "") + ("(des)" if destructive else "") + equality.name
 
-    def _rewrite(match, lhs_hyperedge=lhs_hyperedge, lhs=lhs, rhs=rhs,
-                 destructive=destructive, rule_container=rule_container,
-                 rhs_leaf_nodes=rhs_leaf_nodes):
-        reason = ByRule(rule_container[0], match)
+        lhs = equality.lhs
+        rhs = equality.rhs
+
+        if reverse:
+            lhs, rhs = rhs, lhs
+
+        if isinstance(lhs, Term):
+            node, lhs_hyperedge, *_ = list_term_elements(lhs)
+            lhs = node
+        else:
+            lhs_hyperedge = None
+            if destructive:
+                logging.warning("LHS is a node, destructivity is ignored")
+                destructive = False
+
+        if not isinstance(lhs, (Term, Node)) or not isinstance(rhs, (Term, Node)):
+            raise ValueError("Both lhs and rhs of the equality should be Terms or nodes: {} = {}"
+                             .format(lhs, rhs))
+
+        self.equality = equality
+        self.reverse = reverse
+        self.destructive = destructive
+        self.name = name
+        self.trigger = lhs
+
+        self._lhs = lhs
+        self._rhs = rhs
+        self._lhs_hyperedge = lhs_hyperedge
+        self._rhs_leaf_nodes = leaf_nodes(rhs)
+
+    def rewrite(self, match):
+        reason = ByRule(self, match)
 
         # If there are nodes in rhs that has no corresponding match from the lhs, we should create
         # new nodes for them (like x -> and(x, or(x, y)), y is such a node)
-        for n in rhs_leaf_nodes:
+        for n in self._rhs_leaf_nodes:
             if not n in match:
                 match = dict(match)
                 match[n] = Node()
 
-        if isinstance(rhs, Term):
-            to_add = list_term_elements(rhs.apply_map(match), top_node=match[lhs], reason=reason)
-            if destructive:
-                return {'remove': [match[lhs_hyperedge]], 'add': to_add}
+        if isinstance(self._rhs, Term):
+            to_add = list_term_elements(self._rhs.apply_map(match),
+                                        top_node=match[self._lhs],
+                                        reason=reason)
+            if self.destructive:
+                return {'remove': [match[self._lhs_hyperedge]], 'add': to_add}
             else:
                 return {'add': to_add}
         else:
-            to_merge = [(match[lhs], rhs.apply_map(match), reason)]
-            if destructive:
-                return {'remove': [match[lhs_hyperedge]], 'merge': to_merge}
+            to_merge = [(match[self._lhs], self._rhs.apply_map(match), reason)]
+            if self.destructive:
+                return {'remove': [match[self._lhs_hyperedge]], 'merge': to_merge}
             else:
                 return {'merge': to_merge}
 
-    rule_container.append(Rule(name=name, trigger=lhs, rewrite=_rewrite))
-
-    return rule_container[0]
 
 class Rewriter(Listener):
     def __init__(self, hypergraph, trigger_manager=None, score=None):

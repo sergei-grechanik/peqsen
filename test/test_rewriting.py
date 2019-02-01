@@ -77,9 +77,9 @@ def check_theory(data, theory, evaluablesig=None):
         # Destructivity is not supported by explanation
         destr = False #data.draw(strategies.booleans())
         if data.draw(strategies.booleans()):
-            rewriter.add_rule(equality_to_rule(e, destructive=destr))
+            rewriter.add_rule(EqualityRule(e, destructive=destr))
         if data.draw(strategies.booleans()):
-            rewriter.add_rule(equality_to_rule(e, destructive=destr, reverse=True))
+            rewriter.add_rule(EqualityRule(e, destructive=destr, reverse=True))
 
     vars_number = data.draw(strategies.integers(0, 4))
     variables = [Node() for _ in range(vars_number)]
