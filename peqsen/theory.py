@@ -8,7 +8,7 @@ from peqsen import Node, Hyperedge, Hypergraph, term, gen_list, parse, make_equa
 import inspect
 import attr
 
-@attr.s(slots=True, frozen=True)
+@attr.s(frozen=True)
 class FiniteFunction:
     name = attr.ib()
     arity = attr.ib()
@@ -16,7 +16,7 @@ class FiniteFunction:
     table = attr.ib()
     func = attr.ib()
 
-@attr.s(slots=True, frozen=True)
+@attr.s(frozen=True)
 class EvaluableSignature:
     signature = attr.ib()
     evaluate = attr.ib()
