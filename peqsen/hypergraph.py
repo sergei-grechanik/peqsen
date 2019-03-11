@@ -9,6 +9,7 @@ import inspect
 import zlib
 
 from hypothesis import strategies
+from typing import Optional, Tuple, Union, Dict, Any, Iterable
 
 def some_name(obj, length=5):
     h = zlib.crc32(str(hash(obj)).encode('ASCII'))
@@ -294,6 +295,16 @@ class Hypergraph:
         self._hyperedges = {}
         self._congruence = congruence
         self.listeners = set()
+
+    def get_listener(self, cls, create_default=True) -> Optional[Listener]:
+        """Get a listener by its type or create a new one."""
+        for l in self.listeners:
+            if isinstance(l, cls):
+                return l
+        if create_default:
+            new_l = cls(self)
+            self.listeners.add(new_l)
+            return new_l
 
     def __repr__(self):
         cong = "" if self._congruence else " NONCONG"

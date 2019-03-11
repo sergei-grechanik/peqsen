@@ -13,6 +13,7 @@ import sqlitedict
 import multiprocessing
 import shutil
 import tqdm
+import math
 
 from typing import Optional, Tuple, Union, Dict, Any, Iterable
 
@@ -23,6 +24,7 @@ class MinimizedTerm:
     script: Optional[Script] = attr.ib(default=None)
     method: Optional['MinimizationMethod'] = attr.ib(default=None)
     base: Optional['MinimizedTerm'] = attr.ib(default=None)
+    stats: Dict = attr.ib(factory=dict)
 
     def __lt__(self, other):
         if term_size(self.minimized) < term_size(other):
@@ -36,7 +38,9 @@ class MinimizedTerm:
         return False
 
 class MinimizationMethod:
-    def minimize(self, term: Term, script: Optional[Script]=None) -> Tuple[Term, Script]:
+    def minimize(self, term: Term, script: Optional[Script]=None) -> Tuple[Term, Script, Dict]:
+        """Return the minimized term, the script to perform minimization and some dict
+        representing additional statistics"""
         pass
 
 class MinimizedTermDB:
@@ -108,10 +112,12 @@ def _minimize_term(arg):
     minimizer, mterm, seed = arg
     random.seed(seed)
     try:
-        new_term, script = minimizer.minimize(mterm.original, mterm.script)
-        new_mterm = MinimizedTerm(mterm.original, new_term, script=script, base=mterm, method=minimizer)
+        new_term, script, stats = minimizer.minimize(mterm.original, mterm.script)
+        new_mterm = MinimizedTerm(mterm.original, new_term, script=script,
+                                  base=mterm, method=minimizer, stats=stats)
         return new_mterm
     except Exception as e:
+        raise e
         return (e, arg)
 
 def minimize_terms_db(db: MinimizedTermDB,
@@ -133,6 +139,7 @@ def minimize_terms_db(db: MinimizedTermDB,
             print(mterm)
             print(ex)
             print()
+            raise ex
         else:
             previous = db.get(mt.original)
             if previous is not None:
@@ -140,16 +147,42 @@ def minimize_terms_db(db: MinimizedTermDB,
             else:
                 db[mt.original] = mt
 
+class ScoringMethod:
+    def __init__(self, graph):
+        self.graph = graph
+    def __call__(self, rule, match):
+        return 0
+
+class AverageMinSizeScoringMethod(ScoringMethod):
+    def __init__(self, graph):
+        self.smallest_tracker = graph.get_listener(SmallestHyperedgeTracker)
+    def __call__(self, rule, match):
+        score = 0
+        nodes = 0
+        for n in match.values():
+            if isinstance(n, Node):
+                nodes += 1
+                score += self.smallest_tracker.smallest_size(n)
+        if nodes == 0:
+            return 0
+        return score/nodes
+
 @attr.s()
-class NaiveMinimizationMethod:
+class ScoreMinimizationMethod:
     theory = attr.ib()
+    scoring_method = attr.ib()
     max_steps: int = attr.ib(default=1000)
 
-    def minimize(self, term: Term, script: Optional[Script]=None) -> Tuple[Term, Script]:
+    def minimize(self, term: Term, script: Optional[Script]=None,
+                 max_steps=None) -> Tuple[Term, Script, Dict]:
         graph = Hypergraph()
         rewriter = Rewriter(graph)
         explanator = ExplanationTracker(graph)
         smallest_tracker = SmallestHyperedgeTracker(graph)
+        scoring_function = self.scoring_method(graph)
+
+        stats = {}
+        stats['min_size_dynamics'] = []
 
         for e in self.theory.equalities:
             rewriter.add_rule(EqualityRule(e))
@@ -162,14 +195,19 @@ class NaiveMinimizationMethod:
         original_match = \
             {k: v for k, v in zip(list_term_elements(term, top_node=top), added_elements)}
 
-        steps = self.max_steps
+        if max_steps is None:
+            max_steps = self.max_steps
 
         if script is not None:
-            res = run_script(graph, script)
-            steps -= script_length(script)
+            run_script(graph, script)
+            start_step = script_length(script)
+        else:
+            start_step = 0
 
-        for i in range(steps):
-            rewriter.perform_rewriting(max_n=1)
+        for i in range(start_step, max_steps):
+            rewriter.perform_rewriting(max_n=1, score=scoring_function)
+            current_min_size = smallest_tracker.smallest_size(term_node.follow())
+            stats['min_size_dynamics'].append((i, current_min_size))
 
         smallest_term = list(smallest_tracker.smallest_terms(term_node.follow()))[0]
 
@@ -177,29 +215,35 @@ class NaiveMinimizationMethod:
         smallest_match.update(original_match)
         script = explanator.script([smallest_match])
 
-        return smallest_term, script
+        return smallest_term, script, stats
+
+@attr.s()
+class NaiveMinimizationMethod:
+    theory = attr.ib()
+    max_steps: int = attr.ib(default=1000)
+
+    def minimize(self, term: Term, script: Optional[Script]=None,
+                 max_steps=None) -> Tuple[Term, Script, Dict]:
+        m = ScoreMinimizationMethod(theory=self.theory, max_steps=self.max_steps,
+                                    scoring_method=ScoringMethod)
+        return m.minimize(term, script, max_steps)
 
 @attr.s()
 class RepeatedMinimizationMethod:
     method: MinimizationMethod = attr.ib()
-    max_steps: int = attr.ib(default=10)
+    iterations: int = attr.ib(default=10)
 
-    def minimize(self, term: Term, script: Optional[Script]=None) -> Tuple[Term, Script]:
+    def minimize(self, term: Term, script: Optional[Script]=None) -> Tuple[Term, Script, Dict]:
         best_term = term
         best_script = script
+        stats_list = []
 
-        for i in range(self.max_steps):
-            new_term, new_script = self.method.minimize(term, best_script)
+        for i in range(self.iterations):
+            best_term, best_script, stats = \
+                self.method.minimize(best_term)
+            stats_list.append(stats)
 
-            assert term_size(new_term) <= term_size(best_term)
-
-            if best_script is None or term_size(new_term) < term_size(best_term) or \
-                    script_length(new_script) < script_length(best_script):
-                best_term, best_script = new_term, new_script
-            else:
-                break
-
-        return best_term, best_script
+        return best_term, best_script, {'substats': stats_list}
 
 def some_naively_minimized_terms(val):
     tuples = []

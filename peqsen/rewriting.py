@@ -101,7 +101,7 @@ class Rewriter(Listener):
             trigger_manager = TriggerManager(hypergraph)
 
         if score is None:
-            score = lambda rule, match, rewrite: 0
+            score = lambda rule, match: 0
 
         self.score = score
 
@@ -119,31 +119,25 @@ class Rewriter(Listener):
         if score is None:
             score = self.score
 
-        unapplicable = []
-        rule_match_rw_score = []
+        rule_match_score = []
         for p in self.pending:
             if not must_still_match or still_match(p[1], self.hypergraph):
-                rw = p[0].rewrite(p[1])
-                if rw is None:
-                    # unapplicable for unknown reasons
-                    unapplicable.append(p)
+                sc = score(p[0], p[1])
+                if sc is None:
+                    # None score means that the match should be discarded
+                    continue
                 else:
-                    sc = score(p[0], p[1], rw)
-                    if sc is None:
-                        # None score means that the match should be discarded
-                        continue
-                    else:
-                        rule_match_rw_score.append((p[0], p[1], rw, sc))
+                    rule_match_score.append((p[0], p[1], sc))
 
-        rule_match_rw_score.sort(key=lambda tup: tup[3], reverse=True)
+        rule_match_score.sort(key=lambda tup: tup[2], reverse=True)
 
         rewrite = {'remove': [], 'add': [], 'merge': []}
-        for tup in rule_match_rw_score[:max_n]:
+        for tup in rule_match_score[:max_n]:
+            rw = tup[0].rewrite(tup[1])
             for field in rewrite:
-                rewrite[field].extend(tup[2].get(field, []))
+                rewrite[field].extend(rw.get(field, []))
 
         self.hypergraph.rewrite(**rewrite)
 
-        new_pending = [(rule, match) for rule, match, _, _ in rule_match_rw_score[max_n:]]
-        new_pending.extend(unapplicable)
+        new_pending = [(rule, match) for rule, match, _ in rule_match_score[max_n:]]
         self.pending = new_pending

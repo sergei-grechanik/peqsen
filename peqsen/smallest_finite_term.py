@@ -156,6 +156,9 @@ class SmallestHyperedgeTracker(Listener):
         #print(hypergraph)
         #print("smallest now =", self.smallest)
 
+    def smallest_size(self, node):
+        return self.smallest[node][0]
+
     def smallest_terms(self, node):
         for h in self.smallest[node][1]:
             if isinstance(h, SelfSufficientNode):
