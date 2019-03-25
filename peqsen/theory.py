@@ -98,6 +98,7 @@ def assoc(label, identity=None):
                                               term(label, [x, term(label, [y, z])]))))
     if identity is not None:
         res.append(make_equality(lambda x: (term(label, [term(identity, ()), x]), x)))
+        res.append(make_equality(lambda x: (term(label, [x, term(identity, ())]), x)))
     return res
 
 def comm(label, identity=None):
@@ -122,6 +123,31 @@ def distrib_left(mul_label, add_label):
     return [make_equality(lambda x, y, z: (term(mul_label, [x, term(add_label, [y, z])]),
                                            term(add_label, [term(mul_label, [x, y]),
                                                             term(mul_label, [x, z])])))]
+
+SKISig = {'S': 0, 'K': 0, 'I': 0, 'app': 2}
+
+SKITheory = \
+    make_theory(
+        SKISig,
+        ["app(I, x) = x",
+         "app(app(K, x), y) = y",
+         "app(app(app(S, x), y), z) = app(app(x, y), app(x, z))"])
+
+GroupSig = {'1': 0, 'mul': 2, 'inv': 1}
+
+GroupTheory = \
+    make_theory(
+        GroupSig,
+        assoc('mul', '1') +
+        ["mul(inv(x), x) = 1", "mul(x, inv(x)) = 1"] +
+        ["inv(mul(x, y)) = mul(inv(y), inv(x))"])
+
+AbelianGroupTheory = \
+    make_theory(
+        GroupSig,
+        comm_assoc('mul', '1') +
+        ["mul(inv(x), x) = 1"] +
+        ["inv(mul(x, y)) = mul(inv(y), inv(x))"])
 
 BooleanSig = \
     make_evaluable_sig(

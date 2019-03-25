@@ -3,9 +3,10 @@ import itertools
 import collections
 import attr
 import logging
+import heapq
 
 from peqsen import Listener, Node, Hyperedge, Hypergraph, Term, TriggerManager, parse, \
-    still_match, ByRule, IthElementReason, list_term_elements, leaf_nodes
+    still_match, ByRule, IthElementReason, list_term_elements, leaf_nodes, match_follow
 
 class Rule:
     def __init__(self, name=None, trigger=None):
@@ -96,6 +97,10 @@ class EqualityRule(Rule):
 
 
 class Rewriter(Listener):
+    """
+    Important note: by default we score each match only once. This makes everything much more
+    efficient.
+    """
     def __init__(self, hypergraph, trigger_manager=None, score=None):
         if trigger_manager is None:
             trigger_manager = TriggerManager(hypergraph)
@@ -108,36 +113,55 @@ class Rewriter(Listener):
         self.hypergraph = hypergraph
         self.trigger_manager = trigger_manager
 
-        self.pending = []
+        self.pending_scored = []
+        self.pending_unscored = []
+
+        self.discarded_counter = 0
+        self.added_counter = 0
 
     def add_rule(self, rule):
         def _callback(match, self=self, rule=rule):
-            self.pending.append((rule, match))
+            self.pending_unscored.append((self.added_counter, rule, match))
+            self.added_counter += 1
         self.trigger_manager.add_trigger(rule.trigger, _callback)
 
-    def perform_rewriting(self, score=None, max_n=None, must_still_match=True):
+    def score_unscored(self, *, score=None, must_still_match=True):
         if score is None:
             score = self.score
 
-        rule_match_score = []
-        for p in self.pending:
-            if not must_still_match or still_match(p[1], self.hypergraph):
-                sc = score(p[0], p[1])
+        for index, rule, match in self.pending_unscored:
+            match = match_follow(match)
+            if not must_still_match or still_match(match, self.hypergraph):
+                sc = score(rule, match)
                 if sc is None:
                     # None score means that the match should be discarded
+                    self.discarded_counter += 1
                     continue
                 else:
-                    rule_match_score.append((p[0], p[1], sc))
+                    heapq.heappush(self.pending_scored, (-sc, index, rule, match))
+            else:
+                # Discarded due to not matching anymore
+                self.discarded_counter += 1
 
-        rule_match_score.sort(key=lambda tup: tup[2], reverse=True)
+        self.pending_unscored = []
+
+    def perform_rewriting(self, *, score=None, max_n=None, must_still_match=True):
+        self.score_unscored(score=score, must_still_match=must_still_match)
+
+        to_perform = []
+        while self.pending_scored and (max_n is None or len(to_perform) < max_n):
+            _, _, rule, match = heapq.heappop(self.pending_scored)
+            match = match_follow(match)
+            if not must_still_match or still_match(match, self.hypergraph):
+                to_perform.append((rule, match))
+            else:
+                # Discarded due to not matching anymore
+                self.discarded_counter += 1
 
         rewrite = {'remove': [], 'add': [], 'merge': []}
-        for tup in rule_match_score[:max_n]:
+        for tup in to_perform:
             rw = tup[0].rewrite(tup[1])
             for field in rewrite:
                 rewrite[field].extend(rw.get(field, []))
 
         self.hypergraph.rewrite(**rewrite)
-
-        new_pending = [(rule, match) for rule, match, _ in rule_match_score[max_n:]]
-        self.pending = new_pending

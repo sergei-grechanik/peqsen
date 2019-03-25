@@ -17,6 +17,18 @@ import math
 
 from typing import Optional, Tuple, Union, Dict, Any, Iterable
 
+tqdm_impl = tqdm.tqdm
+
+class FakePool:
+    def imap_unordered(self, fun, args):
+        return (fun(a) for a in args)
+
+def make_multiprocessing_pool(n_jobs):
+    if n_jobs is None:
+        return FakePool()
+    else:
+        return multiprocessing.Pool(n_jobs)
+
 @attr.s()
 class MinimizedTerm:
     original: Term = attr.ib()
@@ -80,8 +92,11 @@ def generate_term(signature, size, variables=None):
         leaves = variables + [Term(l) for l, a in signature.items() if a == 0]
         return random.choice(leaves)
     else:
-        label, arity = random.choice([(l, a) for l, a in signature.items()
-                                      if a + 1 <= size and a > 0])
+        suitable_labels = [(l, a) for l, a in signature.items()
+                           if a + 1 <= size and a > 0]
+        if not suitable_labels:
+            suitable_labels = [(l, a) for l, a in signature.items() if a > 0]
+        label, arity = random.choice(suitable_labels)
         buckets = [1 for _ in range(arity)]
         for _ in range(size - arity - 1):
             buckets[random.randrange(arity)] += 1
@@ -101,11 +116,11 @@ def generate_random_terms_db(db: MinimizedTermDB, signature: Dict[Any, int], *, 
     for v in range(variables):
         signature[Var(v)] = 0
 
-    pool = multiprocessing.Pool(n_jobs)
+    pool = make_multiprocessing_pool(n_jobs)
     args = [(signature, i, random.randint(0, sys.maxsize))
             for i in range(min_size, max_size) for _ in range(count_per_size)]
     desc = "Generating random terms size in [{}, {}]".format(min_size, max_size)
-    for t in tqdm.tqdm(pool.imap_unordered(_generate_term, args), desc=desc, total=len(args)):
+    for t in tqdm_impl(pool.imap_unordered(_generate_term, args), desc=desc, total=len(args)):
         db[t] = db.get(t, MinimizedTerm(t, t))
 
 def _minimize_term(arg):
@@ -126,11 +141,11 @@ def minimize_terms_db(db: MinimizedTermDB,
                       *, n_jobs=4, seed=42):
     random.seed(seed)
 
-    pool = multiprocessing.Pool(n_jobs)
+    pool = make_multiprocessing_pool(n_jobs)
     args = [(minimizer, mterm, random.randint(0, sys.maxsize))
             for mterm in minimized_terms]
     desc = "Minimizing terms with {}".format(type(minimizer).__name__)
-    for mt in tqdm.tqdm(pool.imap_unordered(_minimize_term, args), desc=desc, total=len(args)):
+    for mt in tqdm_impl(pool.imap_unordered(_minimize_term, args), desc=desc, total=len(args)):
         if isinstance(mt, tuple) and isinstance(mt[0], Exception):
             ex, (_, mterm, _) = mt
             print()
@@ -183,6 +198,9 @@ class ScoreMinimizationMethod:
 
         stats = {}
         stats['min_size_dynamics'] = []
+        stats['pending_matches_dynamics'] = []
+        stats['added_counter_dynamics'] = []
+        stats['discarded_counter_dynamics'] = []
 
         for e in self.theory.equalities:
             rewriter.add_rule(EqualityRule(e))
@@ -208,6 +226,10 @@ class ScoreMinimizationMethod:
             rewriter.perform_rewriting(max_n=1, score=scoring_function)
             current_min_size = smallest_tracker.smallest_size(term_node.follow())
             stats['min_size_dynamics'].append((i, current_min_size))
+            total_pending = len(rewriter.pending_scored) + len(rewriter.pending_unscored)
+            stats['pending_matches_dynamics'].append((i, total_pending))
+            stats['added_counter_dynamics'].append((i, rewriter.added_counter))
+            stats['discarded_counter_dynamics'].append((i, rewriter.discarded_counter))
 
         smallest_term = list(smallest_tracker.smallest_terms(term_node.follow()))[0]
 
@@ -227,6 +249,53 @@ class NaiveMinimizationMethod:
         m = ScoreMinimizationMethod(theory=self.theory, max_steps=self.max_steps,
                                     scoring_method=ScoringMethod)
         return m.minimize(term, script, max_steps)
+
+@attr.s()
+class OneLayerMinimizationMethod:
+    theory = attr.ib()
+    max_steps: int = attr.ib(default=None)
+
+    def minimize(self, term: Term, script: Optional[Script]=None,
+                 max_steps=None) -> Tuple[Term, Script, Dict]:
+        graph = Hypergraph()
+        rewriter = Rewriter(graph)
+        explanator = ExplanationTracker(graph)
+        smallest_tracker = SmallestHyperedgeTracker(graph)
+
+        stats = {}
+
+        for e in self.theory.equalities:
+            rewriter.add_rule(EqualityRule(e))
+            rewriter.add_rule(EqualityRule(e, reverse=True))
+
+        added_elements = graph.rewrite(add=term)[1:]
+        term_node = added_elements[0]
+
+        top = Node()
+        original_match = \
+            {k: v for k, v in zip(list_term_elements(term, top_node=top), added_elements)}
+
+        if max_steps is None:
+            max_steps = self.max_steps
+
+        if script is not None:
+            run_script(graph, script)
+            start_step = script_length(script)
+        else:
+            start_step = 0
+
+        # Don't do the next layer
+        graph.listeners.discard(rewriter.trigger_manager)
+
+        rewriter.perform_rewriting(max_n=max_steps)
+
+        smallest_term = list(smallest_tracker.smallest_terms(term_node.follow()))[0]
+
+        smallest_match = list(smallest_tracker.smallest_matches(term_node.follow(), top_node=top))[0]
+        smallest_match.update(original_match)
+        script = explanator.script([smallest_match])
+
+        return smallest_term, script, stats
 
 @attr.s()
 class RepeatedMinimizationMethod:
@@ -278,9 +347,4 @@ class BooleanTermMinimizationExperiment:
             minimize_terms_db(db, method, (mt for mt in terms_db.values() if mt.original not in db),
                               n_jobs=self.n_jobs)
         return db
-
-if __name__ == "__main__":
-    exp = BooleanTermMinimizationExperiment("boolean-min-01", n_jobs=6)
-    for mterm in exp.naively_minimized_terms(False).values():
-        print(term_size(mterm.original), term_size(mterm.minimized))
 
