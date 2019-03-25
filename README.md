@@ -4,3 +4,7 @@ This is an experimental equality saturation engine written in python. It works w
 arbitrary finite signatures and sets of rewriting rules. It also supports explanations (not
 perfectly though). Its main goal is to support machine learning so that it is possible to learn
 rewriting strategies (this part is not implemented yet).
+
+## Experiments
+
+* [Naive boolean term minimization](notebooks/boolean-terms-minimization-01.ipynb)
