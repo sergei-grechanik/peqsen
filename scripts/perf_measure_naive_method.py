@@ -5,8 +5,8 @@
 
 from peqsen.examples.term_minimization import *
 
-max_size = 11
-min_size = 10
+max_size = 61
+min_size = 60
 count_per_size = 5
 max_steps = 200
 variables_num = 3
@@ -18,5 +18,7 @@ generate_random_terms_db(db, BooleanSig.signature, n_jobs=n_jobs,
                          variables=variables_num)
 
 db_naively_minimized = {}
-method = NaiveMinimizationMethod(theory=BooleanTheory, max_steps=max_steps)
+# method = NaiveMinimizationMethod(theory=BooleanTheory, max_steps=max_steps)
+method = OneLayerMinimizationMethod(theory=BooleanTheory, max_steps=200)
+method = RepeatedMinimizationMethod(method=method, iterations=5)
 minimize_terms_db(db_naively_minimized, method, db.values(), n_jobs=n_jobs)

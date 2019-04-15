@@ -231,11 +231,10 @@ class ScoreMinimizationMethod:
             stats['added_counter_dynamics'].append((i, rewriter.added_counter))
             stats['discarded_counter_dynamics'].append((i, rewriter.discarded_counter))
 
-        smallest_term = list(smallest_tracker.smallest_terms(term_node.follow()))[0]
-
-        smallest_match = list(smallest_tracker.smallest_matches(term_node.follow(), top_node=top))[0]
+        smallest_term, smallest_match = \
+            smallest_tracker.smallest_term_match_single(term_node.follow())
         smallest_match.update(original_match)
-        script = explanator.script([smallest_match])
+        script = explanator.script(smallest_match)
 
         return smallest_term, script, stats
 
@@ -263,9 +262,12 @@ class OneLayerMinimizationMethod:
         smallest_tracker = SmallestHyperedgeTracker(graph)
 
         stats = {}
+        stats['min_size_dynamics'] = []
+        stats['pending_matches_dynamics'] = []
 
         for e in self.theory.equalities:
             rewriter.add_rule(EqualityRule(e))
+        for e in self.theory.equalities:
             rewriter.add_rule(EqualityRule(e, reverse=True))
 
         added_elements = graph.rewrite(add=term)[1:]
@@ -287,13 +289,20 @@ class OneLayerMinimizationMethod:
         # Don't do the next layer
         graph.listeners.discard(rewriter.trigger_manager)
 
-        rewriter.perform_rewriting(max_n=max_steps)
+        scoring_function = lambda *_: random.random()
 
-        smallest_term = list(smallest_tracker.smallest_terms(term_node.follow()))[0]
+        # rewriter.perform_rewriting(max_n=max_steps)
+        for i in range(start_step, max_steps):
+            rewriter.perform_rewriting(max_n=1, score=scoring_function)
+            current_min_size = smallest_tracker.smallest_size(term_node.follow())
+            stats['min_size_dynamics'].append((i, current_min_size))
+            total_pending = len(rewriter.pending_scored) + len(rewriter.pending_unscored)
+            stats['pending_matches_dynamics'].append((i, total_pending))
 
-        smallest_match = list(smallest_tracker.smallest_matches(term_node.follow(), top_node=top))[0]
+        smallest_term, smallest_match = \
+            smallest_tracker.smallest_term_match_single(term_node.follow())
         smallest_match.update(original_match)
-        script = explanator.script([smallest_match])
+        script = explanator.script(smallest_match)
 
         return smallest_term, script, stats
 
@@ -308,9 +317,14 @@ class RepeatedMinimizationMethod:
         stats_list = []
 
         for i in range(self.iterations):
-            best_term, best_script, stats = \
+            new_term, new_script, stats = \
                 self.method.minimize(best_term)
             stats_list.append(stats)
+            if best_script is None:
+                best_script = new_script
+            else:
+                best_script = compose_scripts(best_script, new_script, term=best_term)
+            best_term = new_term
 
         return best_term, best_script, {'substats': stats_list}
 

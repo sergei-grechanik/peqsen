@@ -180,6 +180,19 @@ class SmallestHyperedgeTracker(Listener):
                     yield (Term(h.label, [p[0] for p in subs]),
                            [h.src, h] + [e for p in subs for e in p[1]])
 
+    def smallest_term_match_single(self, node, top_node=None):
+        p = self._smallest_term_matches_single(node)
+        return p[0], {k: v for k, v in zip(list_term_elements(p[0], top_node=top_node), p[1])}
+
+    def _smallest_term_matches_single(self, node):
+        h = next(iter(self.smallest[node][1]))
+        if isinstance(h, SelfSufficientNode):
+            return (node, [node])
+        else:
+            subs = [self._smallest_term_matches_single(d) for d in h.dst]
+            return (Term(h.label, [p[0] for p in subs]),
+                    [h.src, h] + [e for p in subs for e in p[1]])
+
 
 def measure_term(term, measure):
     return measure(term.label, [measure_term(d, measure) for d in term.dst])

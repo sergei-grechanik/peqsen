@@ -184,7 +184,7 @@ def list_term_elements(term, top_node=None, reason=None, index=0):
         else:
             n = top_node
 
-        more_elements = []
+        more_elements = [None, None]
         dst = []
         idx = index + 2
         for d in term.dst:
@@ -200,7 +200,9 @@ def list_term_elements(term, top_node=None, reason=None, index=0):
             if hasattr(d, '_is_term_node') and d._is_term_node:
                 d.incoming.add(h)
 
-        return [n, h] + more_elements
+        more_elements[0] = n
+        more_elements[1] = h
+        return more_elements
     elif isinstance(term, Node):
         if top_node is not None:
             raise ValueError("Cannot apply top_node to a trivial term")

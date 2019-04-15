@@ -8,3 +8,4 @@ rewriting strategies (this part is not implemented yet).
 ## Experiments
 
 * [Naive boolean term minimization](notebooks/boolean-terms-minimization-01.ipynb)
+* [Less naive boolean term minimization](notebooks/boolean-terms-minimization-02.ipynb)
